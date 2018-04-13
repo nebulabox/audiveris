@@ -34,8 +34,9 @@ import org.audiveris.omr.sheet.rhythm.Measure;
 import org.audiveris.omr.sheet.rhythm.MeasureStack;
 import org.audiveris.omr.sheet.rhythm.Slot;
 import org.audiveris.omr.sheet.ui.ExtractionMenu;
-import org.audiveris.omr.sig.ui.GlyphMenu;
-import org.audiveris.omr.sig.ui.InterMenu;
+import org.audiveris.omr.sig.ui.GlyphListMenu;
+import org.audiveris.omr.sig.ui.InterListMenu;
+import org.audiveris.omr.step.Step;
 import org.audiveris.omr.ui.view.LocationDependentMenu;
 
 import org.slf4j.Logger;
@@ -82,8 +83,8 @@ public class EditorMenu
     //--------------//
     private void defineLayout ()
     {
-        addMenu(new InterMenu(sheet));
-        addMenu(new GlyphMenu(sheet));
+        addMenu(new InterListMenu(sheet));
+        addMenu(new GlyphListMenu(sheet));
 
         if (SampleRepository.USE_TRIBES) {
             addMenu(new TribesMenu(sheet));
@@ -103,7 +104,7 @@ public class EditorMenu
         List<SystemInfo> systems = sheet.getSystems();
 
         if (systems != null) {
-            return sheet.getSymbolsEditor().getMeasureAt(point);
+            return sheet.getSymbolsEditor().getStrictMeasureAt(point);
         }
 
         return null;
@@ -117,108 +118,13 @@ public class EditorMenu
         List<SystemInfo> systems = sheet.getSystems();
 
         if (systems != null) {
-            return sheet.getSymbolsEditor().getSlotAt(point);
+            return sheet.getSymbolsEditor().getStrictSlotAt(point);
         }
 
         return null;
     }
 
     //~ Inner Classes ------------------------------------------------------------------------------
-    //    //-----------//
-    //    // ChordMenu //
-    //    //-----------//
-    //    /**
-    //     * Dump the chords that translate the selected glyphs.
-    //     */
-    //    private class ChordMenu
-    //            extends LocationDependentMenu
-    //    {
-    //        //~ Instance fields ------------------------------------------------------------------------
-    //
-    //        /** Selected chords. */
-    //        private final Set<ChordInter> selectedChords = new LinkedHashSet<ChordInter>();
-    //
-    //        //~ Constructors ---------------------------------------------------------------------------
-    //        public ChordMenu ()
-    //        {
-    //            super("Chord");
-    //            add(new JMenuItem(new DumpAction()));
-    //        }
-    //
-    //        //~ Methods --------------------------------------------------------------------------------
-    //        @Override
-    //        public void updateUserLocation (Rectangle rect)
-    //        {
-    //            SymbolsController controller = sheet.getGlyphsController();
-    //            Set<Glyph> glyphs = controller.getNest().getSelectedGlyphSet();
-    //            selectedChords.clear();
-    //            setText("");
-    //
-    //            if (glyphs != null) {
-    //                for (Glyph glyph : glyphs) {
-    //                    for (Object obj : glyph.getTranslations()) {
-    //                        if (obj instanceof AbstractNoteInter) {
-    //                            AbstractNoteInter note = (AbstractNoteInter) obj;
-    //                            ChordInter chord = note.getChord();
-    //
-    //                            if (chord != null) {
-    //                                selectedChords.add(chord);
-    //                            }
-    //                        } else if (obj instanceof ChordInter) {
-    //                            selectedChords.add((ChordInter) obj);
-    //                        }
-    //                    }
-    //                }
-    //
-    //                if (!selectedChords.isEmpty()) {
-    //                    List<ChordInter> chordList = new ArrayList<ChordInter>(selectedChords);
-    //                    Collections.sort(chordList, ChordInter.byAbscissa);
-    //
-    //                    StringBuilder sb = new StringBuilder();
-    //
-    //                    for (ChordInter chord : chordList) {
-    //                        if (sb.length() > 0) {
-    //                            sb.append(", ");
-    //                        }
-    //
-    //                        sb.append("Chord #").append(chord.getId());
-    //                    }
-    //
-    //                    sb.append(" ...");
-    //                    setText(sb.toString());
-    //                }
-    //            }
-    //
-    //            setVisible(!selectedChords.isEmpty());
-    //        }
-    //
-    //        //~ Inner Classes --------------------------------------------------------------------------
-    //        /**
-    //         * Dump the current chord(s)
-    //         */
-    //        private class DumpAction
-    //                extends AbstractAction
-    //        {
-    //            //~ Constructors -----------------------------------------------------------------------
-    //
-    //            public DumpAction ()
-    //            {
-    //                putValue(NAME, "Dump chord(s)");
-    //                putValue(SHORT_DESCRIPTION, "Dump the selected chord(s)");
-    //            }
-    //
-    //            //~ Methods ----------------------------------------------------------------------------
-    //            @Override
-    //            public void actionPerformed (ActionEvent e)
-    //            {
-    //                // Dump the selected chords
-    //                for (ChordInter chord : selectedChords) {
-    //                    logger.info(chord.toString());
-    //                }
-    //            }
-    //        }
-    //    }
-    //
     //-------------//
     // MeasureMenu //
     //-------------//
@@ -230,11 +136,17 @@ public class EditorMenu
         /** Selected measure. */
         private MeasureStack stack;
 
+        private RhythmAction rhythmAction = new RhythmAction();
+
+        private MergeAction mergeAction = new MergeAction();
+
         //~ Constructors ---------------------------------------------------------------------------
         public MeasureMenu ()
         {
             super("Measure");
             add(new JMenuItem(new DumpAction()));
+            add(new JMenuItem(rhythmAction));
+            ///add(new JMenuItem(mergeAction));
         }
 
         //~ Methods --------------------------------------------------------------------------------
@@ -252,14 +164,16 @@ public class EditorMenu
             setVisible(stack != null);
 
             if (stack != null) {
-                String id = stack.getPageId() + (stack.isCautionary() ? "C" : "");
-                setText("Measure #" + id + " ...");
+                setText("Measure #" + stack.getPageId() + " ...");
             }
+
+            rhythmAction.update();
+            mergeAction.update();
         }
 
         //~ Inner Classes --------------------------------------------------------------------------
         /**
-         * Dump the current measure
+         * Dump the current measure.
          */
         private class DumpAction
                 extends AbstractAction
@@ -277,6 +191,67 @@ public class EditorMenu
             public void actionPerformed (ActionEvent e)
             {
                 stack.printVoices("\n");
+            }
+        }
+
+        /**
+         * Merge current measure with the following one in current system.
+         */
+        private class MergeAction
+                extends AbstractAction
+        {
+            //~ Constructors -----------------------------------------------------------------------
+
+            public MergeAction ()
+            {
+                putValue(NAME, "Merge on right");
+                putValue(SHORT_DESCRIPTION, "Merge this measure with measure on right");
+            }
+
+            //~ Methods ----------------------------------------------------------------------------
+            @Override
+            public void actionPerformed (ActionEvent e)
+            {
+                logger.info("MergeAction not yet implemented");
+            }
+
+            private void update ()
+            {
+                setEnabled(
+                        (stack == null)
+                        && (sheet.getStub().getLatestStep().compareTo(Step.MEASURES) >= 0));
+            }
+        }
+
+        /**
+         * Reprocess rhythm of the current measure.
+         */
+        private class RhythmAction
+                extends AbstractAction
+        {
+            //~ Constructors -----------------------------------------------------------------------
+
+            public RhythmAction ()
+            {
+                putValue(NAME, "Reprocess rhythm");
+                putValue(SHORT_DESCRIPTION, "Reprocess rhythm on the selected measure");
+            }
+
+            //~ Methods ----------------------------------------------------------------------------
+            @Override
+            public void actionPerformed (ActionEvent e)
+            {
+                sheet.getInterController().reprocessRhythm(stack);
+            }
+
+            private void update ()
+            {
+                if (stack == null) {
+                    setEnabled(false);
+                } else {
+                    // Action enabled only if step >= RHYTHMS
+                    setEnabled(sheet.getStub().getLatestStep().compareTo(Step.RHYTHMS) >= 0);
+                }
             }
         }
     }
@@ -307,7 +282,7 @@ public class EditorMenu
             List<SystemInfo> systems = sheet.getSystems();
 
             if (systems != null) {
-                slot = sheet.getSymbolsEditor().getSlotAt(GeoUtil.centerOf(rect));
+                slot = sheet.getSymbolsEditor().getStrictSlotAt(GeoUtil.centerOf(rect));
             } else {
                 slot = null;
             }
@@ -391,7 +366,7 @@ public class EditorMenu
         public void updateUserLocation (Rectangle rect)
         {
             StaffManager staffManager = sheet.getStaffManager();
-            staff = staffManager.getClosestStaff(GeoUtil.centerOf(rect));
+            staff = staffManager.getStrictStaffAt(GeoUtil.centerOf(rect));
             setVisible(staff != null);
 
             if (staff != null) {

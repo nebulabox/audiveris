@@ -29,7 +29,6 @@ import org.audiveris.omr.sheet.beam.BeamGroup;
 import static org.audiveris.omr.sheet.rhythm.Voice.Status.BEGIN;
 import org.audiveris.omr.sig.inter.AbstractBeamInter;
 import org.audiveris.omr.sig.inter.AbstractChordInter;
-import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.RestChordInter;
 import org.audiveris.omr.util.Navigable;
 
@@ -254,7 +253,7 @@ public class Voice
                 } else if (delta.compareTo(Rational.ZERO) > 0) {
                     // Flag the voice as too long
                     String prefix = stack.getSystem().getLogPrefix();
-                    logger.info("{}{} Voice #{} too long {}", prefix, stack, getId(), delta);
+                    logger.info("{}{} Voice #{} too long {}", prefix, measure, getId(), delta);
                     excess = delta; // For voice
 
                     if ((stack.getExcess() == null) || (delta.compareTo(stack.getExcess()) > 0)) {
@@ -300,6 +299,14 @@ public class Voice
     //-------------//
     // getDuration //
     //-------------//
+    /**
+     * Report the precise duration of this voice.
+     * <p>
+     * Note that if the voice is just a whole/multi rest we have no precise duration (the voice
+     * duration will be the measure duration, whatever it is), hence we report a null value.
+     *
+     * @return the voice duration or null
+     */
     public Rational getDuration ()
     {
         if (wholeRestChord != null) {
@@ -513,34 +520,6 @@ public class Voice
         return measure;
     }
 
-    //
-    //    //------------------//
-    //    // getPreviousChord //
-    //    //------------------//
-    //    /**
-    //     * Starting from a provided chord in this voice, report the previous chord, if any,
-    //     * within that voice.
-    //     *
-    //     * @param chord the provided chord
-    //     * @return the chord right before, or null
-    //     */
-    //    public AbstractChordInter getPreviousChord (AbstractChordInter chord)
-    //    {
-    //        AbstractChordInter prevChord = null;
-    //
-    //        for (Map.Entry<Slot, SlotVoice> entry : slotTable.entrySet()) {
-    //            SlotVoice info = entry.getValue();
-    //
-    //            if (info.chord == chord) {
-    //                break;
-    //            }
-    //
-    //            prevChord = info.chord;
-    //        }
-    //
-    //        return prevChord;
-    //    }
-    //
     //----------//
     // getRests //
     //----------//
@@ -634,29 +613,6 @@ public class Voice
     public boolean isFree (Slot slot)
     {
         return ((getWholeChord() == null) && (slots != null) && (slots.get(slot.getId()) == null));
-    }
-
-    //------------//
-    // isOnlyRest //
-    //------------//
-    /**
-     * report whether the voice is made of rests only.
-     *
-     * @return true if rests only
-     */
-    public boolean isOnlyRest ()
-    {
-        for (Slot slot : measure.getStack().getSlots()) {
-            SlotVoice info = getSlotInfo(slot);
-
-            if ((info != null) && (info.status == Status.BEGIN)) {
-                if (info.chord.getNotes().get(0) instanceof HeadInter) {
-                    return false;
-                }
-            }
-        }
-
-        return true;
     }
 
     //---------//
@@ -762,11 +718,11 @@ public class Voice
         sb.append("V").append(id).append(" ");
 
         // Whole/Multi
-        if (wholeRestChord != null) {
-            sb.append("|Ch#").append(String.format("%-4s", wholeRestChord.getId()));
+        if (isWhole()) {
+            sb.append("|Ch#").append(String.format("%-5s", wholeRestChord.getId()));
 
             for (int s = 1; s < measure.getStack().getSlots().size(); s++) {
-                sb.append("========");
+                sb.append("=========");
             }
 
             sb.append("|W");
@@ -779,7 +735,7 @@ public class Voice
                 if (info != null) {
                     // Active chord => busy
                     if (info.status == Status.BEGIN) {
-                        sb.append("|Ch#").append(String.format("%-4s", info.chord.getId()));
+                        sb.append("|Ch#").append(String.format("%-5s", info.chord.getId()));
 
                         Rational chordEnd = slot.getTimeOffset().plus(info.chord.getDuration());
 
@@ -787,10 +743,10 @@ public class Voice
                             voiceDur = chordEnd;
                         }
                     } else { // CONTINUE
-                        sb.append("========");
+                        sb.append("=========");
                     }
                 } else { // No active chord => free
-                    sb.append("|.......");
+                    sb.append("|........");
                 }
             }
 
@@ -953,3 +909,55 @@ public class Voice
         }
     }
 }
+//
+//    //------------//
+//    // isOnlyRest //
+//    //------------//
+//    /**
+//     * report whether the voice is made of rests only.
+//     *
+//     * @return true if rests only
+//     */
+//    public boolean isOnlyRest ()
+//    {
+//        for (Slot slot : measure.getStack().getSlots()) {
+//            SlotVoice info = getSlotInfo(slot);
+//
+//            if ((info != null) && (info.status == Status.BEGIN)) {
+//                if (info.chord.getNotes().get(0) instanceof HeadInter) {
+//                    return false;
+//                }
+//            }
+//        }
+//
+//        return true;
+//    }
+//
+//
+//    //------------------//
+//    // getPreviousChord //
+//    //------------------//
+//    /**
+//     * Starting from a provided chord in this voice, report the previous chord, if any,
+//     * within that voice.
+//     *
+//     * @param chord the provided chord
+//     * @return the chord right before, or null
+//     */
+//    public AbstractChordInter getPreviousChord (AbstractChordInter chord)
+//    {
+//        AbstractChordInter prevChord = null;
+//
+//        for (Map.Entry<Slot, SlotVoice> entry : slotTable.entrySet()) {
+//            SlotVoice info = entry.getValue();
+//
+//            if (info.chord == chord) {
+//                break;
+//            }
+//
+//            prevChord = info.chord;
+//        }
+//
+//        return prevChord;
+//    }
+//

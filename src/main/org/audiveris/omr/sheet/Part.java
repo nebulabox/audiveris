@@ -22,6 +22,8 @@
 package org.audiveris.omr.sheet;
 
 import org.audiveris.omr.score.LogicalPart;
+import org.audiveris.omr.score.Page;
+import org.audiveris.omr.score.Score;
 import org.audiveris.omr.score.StaffPosition;
 import org.audiveris.omr.sheet.rhythm.Measure;
 import org.audiveris.omr.sheet.rhythm.Voice;
@@ -29,6 +31,7 @@ import org.audiveris.omr.sig.inter.AbstractTimeInter;
 import org.audiveris.omr.sig.inter.ClefInter;
 import org.audiveris.omr.sig.inter.KeyInter;
 import org.audiveris.omr.sig.inter.LyricLineInter;
+import org.audiveris.omr.sig.inter.SentenceInter;
 import org.audiveris.omr.sig.inter.SlurInter;
 import org.audiveris.omr.step.PageStep;
 import static org.audiveris.omr.util.HorizontalSide.*;
@@ -54,6 +57,8 @@ import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlAttribute;
 import javax.xml.bind.annotation.XmlElement;
+import javax.xml.bind.annotation.XmlIDREF;
+import javax.xml.bind.annotation.XmlList;
 import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
 
 /**
@@ -114,8 +119,9 @@ public class Part
     private int id;
 
     /** Name, if any, that faces this system part. */
+    @XmlIDREF
     @XmlAttribute
-    private String name;
+    private SentenceInter name;
 
     /** Indicate a dummy physical part. */
     @XmlAttribute
@@ -134,13 +140,17 @@ public class Part
     @XmlElement(name = "measure")
     private final List<Measure> measures = new ArrayList<Measure>();
 
-    /** Lyric lines in this part. */
-    @XmlElement(name = "lyric-line")
-    private final List<LyricLineInter> lyrics = new ArrayList<LyricLineInter>();
+    /** Lyric lines in this part. To be kept sorted vertically. */
+    @XmlList
+    @XmlIDREF
+    @XmlElement(name = "lyric-lines")
+    private List<LyricLineInter> lyrics;
 
     /** Slurs in this part. */
-    @XmlElement(name = "slur")
-    private final List<SlurInter> slurs = new ArrayList<SlurInter>();
+    @XmlList
+    @XmlIDREF
+    @XmlElement(name = "slurs")
+    private List<SlurInter> slurs;
 
     // Transient data
     //---------------
@@ -173,6 +183,10 @@ public class Part
     //----------//
     public void addLyric (LyricLineInter lyric)
     {
+        if (lyrics == null) {
+            lyrics = new ArrayList<LyricLineInter>();
+        }
+
         lyrics.add(lyric);
     }
 
@@ -189,6 +203,10 @@ public class Part
     //---------//
     public void addSlur (SlurInter slur)
     {
+        if (slurs == null) {
+            slurs = new ArrayList<SlurInter>();
+        }
+
         slurs.add(slur);
     }
 
@@ -198,6 +216,7 @@ public class Part
     public void addStaff (Staff staff)
     {
         staves.add(staff);
+        staff.setPart(this);
     }
 
     //-------------//
@@ -210,73 +229,14 @@ public class Part
                 measure.afterReload();
             }
 
-            for (SlurInter slur : slurs) {
-                slur.setPart(this);
+            if (slurs != null) {
+                for (SlurInter slur : slurs) {
+                    slur.setPart(this);
+                }
             }
         } catch (Exception ex) {
             logger.warn("Error in " + getClass() + " afterReload() " + ex, ex);
         }
-    }
-
-    //------------------//
-    // connectSlursWith //
-    //------------------//
-    /**
-     * Try to connect the orphan slurs at the beginning of this part
-     * with the orphan slurs at the end of the provided preceding part.
-     * <p>
-     * Ending orphan slurs that cannot connect are deleted.
-     * <p>
-     * This method is called in two contexts:<ol>
-     * <li>Within a page: it processes slur connections between systems of the page.
-     * <li>Within a score: it processes slur connections between pages of a score.
-     * </ol>
-     *
-     * @param precedingPart the part to connect to, in the preceding system,
-     *                      [perhaps the last system of the preceding page]
-     * @return the map (slur -> prevSlur) of connections detected
-     */
-    public Map<SlurInter, SlurInter> connectSlursWith (Part precedingPart)
-    {
-        Objects.requireNonNull(precedingPart, "Null part to connectSlursWith");
-
-        // Links: Slur -> prevSlur
-        Map<SlurInter, SlurInter> links = new LinkedHashMap<SlurInter, SlurInter>();
-
-        // Orphans slurs at the beginning of the current system part
-        List<SlurInter> orphans = getSlurs(SlurInter.isBeginningOrphan);
-        Collections.sort(orphans, SlurInter.verticalComparator);
-
-        List<SlurInter> precedingOrphans = precedingPart.getSlurs(SlurInter.isEndingOrphan);
-        Collections.sort(precedingOrphans, SlurInter.verticalComparator);
-
-        // Connect the orphans as much as possible
-        SlurLoop:
-        for (SlurInter slur : orphans) {
-            for (SlurInter prevSlur : precedingOrphans) {
-                if (slur.canExtend(prevSlur)) {
-                    // Cross-extensions
-                    links.put(slur, prevSlur);
-                    slur.checkTie(prevSlur);
-
-                    continue SlurLoop;
-                }
-            }
-
-            // No connection for this orphan
-            logger.info("Could not left-connect slur#" + slur.getId());
-            slur.delete();
-        }
-
-        // Check previous orphans for non-connected ones
-        precedingOrphans.removeAll(links.values());
-
-        for (SlurInter prevSlur : precedingOrphans) {
-            logger.info("Could not right-connect slur#" + prevSlur.getId());
-            prevSlur.delete();
-        }
-
-        return links;
     }
 
     //-----------------//
@@ -309,15 +269,14 @@ public class Part
      */
     public Part createDummyPart (int id)
     {
-        logger.info("S#{} {} createDummyPart for id={}", system.getId(), this, id);
+        final int sn = system.getSheet().getStub().getNumber();
+        logger.info("Sheet#{} System#{} {} dummyPart id: {}", sn, system.getId(), this, id);
 
         // Find some concrete system part for the provided id
         Part refPart = findRefPart(id);
         Part dummyPart = new Part(system);
-
-        dummyPart.setId(id);
         dummyPart.setDummy();
-        dummyPart.setLogicalPart(refPart.getLogicalPart());
+        dummyPart.setId(id);
 
         Measure refMeasure = refPart.getFirstMeasure();
 
@@ -376,6 +335,66 @@ public class Part
         }
 
         return dummyPart;
+    }
+
+    //-------------------//
+    // getCrossSlurLinks //
+    //-------------------//
+    /**
+     * Retrieve possible links between the orphan slurs at the beginning of this part
+     * and the orphan slurs at the end of the provided preceding part.
+     * <p>
+     * Important: Nothing is written in slurs yet, only in links map.
+     * <p>
+     * This method is called in two contexts:<ol>
+     * <li>Within a page: it processes slur connections between systems of the page.
+     * <li>Within a score: it processes slur connections between pages of a score.
+     * </ol>
+     *
+     * @param precedingPart the part to connect to, in the preceding system,
+     *                      [perhaps the last system of the preceding page]
+     * @return the map (slur &rarr; prevSlur) of connections detected
+     */
+    public Map<SlurInter, SlurInter> getCrossSlurLinks (Part precedingPart)
+    {
+        Objects.requireNonNull(precedingPart, "Null part to connect Slurs with");
+
+        // Links: Slur -> prevSlur
+        Map<SlurInter, SlurInter> links = new LinkedHashMap<SlurInter, SlurInter>();
+
+        // Orphans slurs at the beginning of the current system part
+        List<SlurInter> orphans = getSlurs(SlurInter.isBeginningOrphan);
+        Collections.sort(orphans, SlurInter.verticalComparator);
+
+        List<SlurInter> precedingOrphans = precedingPart.getSlurs(SlurInter.isEndingOrphan);
+        Collections.sort(precedingOrphans, SlurInter.verticalComparator);
+
+        // Connect the orphans as much as possible
+        SlurLoop:
+        for (SlurInter slur : orphans) {
+            for (SlurInter prevSlur : precedingOrphans) {
+                if (slur.isVip() || prevSlur.isVip()) {
+                    logger.info("VIP cross test prevSlur:{} slur:{}", prevSlur, slur);
+                }
+
+                // Check left side of slur
+                if ((slur.getExtension(LEFT) != null) || (links.get(slur) != null)) {
+                    continue SlurLoop;
+                }
+
+                // Check right side of previous slur
+                if ((prevSlur.getExtension(RIGHT) == null) && !links.containsValue(prevSlur)) {
+                    // Check pitches compatibility
+                    if (slur.canExtend(prevSlur)) {
+                        links.put(slur, prevSlur);
+
+                        continue SlurLoop;
+                    }
+                }
+            }
+        }
+
+        return links;
     }
 
     //-----------------//
@@ -494,7 +513,7 @@ public class Part
     //-----------//
     public List<LyricLineInter> getLyrics ()
     {
-        return lyrics;
+        return (lyrics != null) ? Collections.unmodifiableList(lyrics) : Collections.EMPTY_LIST;
     }
 
     //--------------//
@@ -549,7 +568,7 @@ public class Part
      */
     public String getName ()
     {
-        return name;
+        return (name != null) ? name.getValue() : null;
     }
 
     //--------//
@@ -597,9 +616,11 @@ public class Part
     {
         List<SlurInter> selectedSlurs = new ArrayList<SlurInter>();
 
-        for (SlurInter slur : slurs) {
-            if (predicate.check(slur)) {
-                selectedSlurs.add(slur);
+        if (slurs != null) {
+            for (SlurInter slur : slurs) {
+                if (predicate.check(slur)) {
+                    selectedSlurs.add(slur);
+                }
             }
         }
 
@@ -694,12 +715,28 @@ public class Part
     public void purgeContainers ()
     {
         // Lyrics
-        for (Iterator<LyricLineInter> it = lyrics.iterator(); it.hasNext();) {
-            LyricLineInter lyric = it.next();
+        if (lyrics != null) {
+            for (Iterator<LyricLineInter> it = lyrics.iterator(); it.hasNext();) {
+                LyricLineInter lyric = it.next();
 
-            if (lyric.isDeleted()) {
-                it.remove();
+                if (lyric.isRemoved()) {
+                    it.remove();
+                }
             }
+        }
+    }
+
+    //-------------//
+    // removeLyric //
+    //-------------//
+    public void removeLyric (LyricLineInter lyric)
+    {
+        if (lyrics != null) {
+            lyrics.remove(lyric);
+        }
+
+        if (lyrics.isEmpty()) {
+            lyrics = null;
         }
     }
 
@@ -714,7 +751,17 @@ public class Part
      */
     public boolean removeSlur (SlurInter slur)
     {
-        return slurs.remove(slur);
+        boolean result = false;
+
+        if (slurs != null) {
+            result = slurs.remove(slur);
+
+            if (slurs.isEmpty()) {
+                slurs = null;
+            }
+        }
+
+        return result;
     }
 
     //----------//
@@ -731,11 +778,17 @@ public class Part
     /**
      * Set the part id.
      *
-     * @param id the id value
+     * @param id the new id value
      */
     public void setId (int id)
     {
-        this.id = id;
+        if (this.id != id) {
+            this.id = id;
+
+            if (!isDummy()) {
+                getSystem().getSheet().getStub().setModified(true);
+            }
+        }
     }
 
     //----------------//
@@ -751,21 +804,13 @@ public class Part
         this.leftBarline = leftBarline;
     }
 
-    //----------------//
-    // setLogicalPart //
-    //----------------//
-    public void setLogicalPart (LogicalPart logicalPart)
-    {
-        setId(logicalPart.getId());
-    }
-
     //---------//
     // setName //
     //---------//
     /**
      * @param name the name to set
      */
-    public void setName (String name)
+    public void setName (SentenceInter name)
     {
         this.name = name;
     }
@@ -776,6 +821,26 @@ public class Part
     public void setSystem (SystemInfo system)
     {
         this.system = system;
+    }
+
+    //----------------//
+    // sortLyricLines //
+    //----------------//
+    /**
+     * Keep the lyrics sorted by vertical order in part.
+     */
+    public void sortLyricLines ()
+    {
+        if (lyrics != null) {
+            Collections.sort(lyrics, SentenceInter.byOrdinate);
+
+            // Assign sequential number to lyric line in its part
+            int lyricNumber = 0;
+
+            for (LyricLineInter line : lyrics) {
+                line.setNumber(++lyricNumber);
+            }
+        }
     }
 
     //-------------//
@@ -845,47 +910,68 @@ public class Part
     /**
      * Look in following systems, then in previous systems, for a real part with the
      * provided ID.
+     * <p>
+     * Method extended to search beyond the current page.
      *
      * @param id the desired part ID
      * @return the first real part with this ID, either in following or in preceding systems.
      */
     private Part findRefPart (int id)
     {
-        // First look in the following systems in the same page
-        SystemInfo nextSystem = system;
+        // First look in the following systems in this page and the following ones
+        final Score score = system.getPage().getScore();
+        Page currentPage = system.getPage();
+        SystemInfo otherSystem = system.getFollowingInPage();
 
         while (true) {
-            nextSystem = nextSystem.getFollowingInPage();
-
-            if (nextSystem != null) {
-                Part part = nextSystem.getPartById(id);
+            if (otherSystem != null) {
+                Part part = otherSystem.getPartById(id);
 
                 if ((part != null) && !part.isDummy()) {
                     return part;
                 }
             } else {
-                break;
+                // Reached end of page
+                Page otherPage = score.getFollowingPage(currentPage);
+
+                if (otherPage != null) {
+                    currentPage = otherPage;
+                    otherSystem = otherPage.getFirstSystem();
+                } else {
+                    break; // Reached end of score
+                }
             }
+
+            otherSystem = otherSystem.getFollowingInPage();
         }
 
-        // Then look in the preceding systems in the same page
-        SystemInfo prevSystem = system;
+        // Then look in the preceding systems in this page and the preceding ones
+        currentPage = system.getPage();
+        otherSystem = system.getPrecedingInPage();
 
         while (true) {
-            prevSystem = prevSystem.getPrecedingInPage();
-
-            if (prevSystem != null) {
-                Part part = prevSystem.getPartById(id);
+            if (otherSystem != null) {
+                Part part = otherSystem.getPartById(id);
 
                 if ((part != null) && !part.isDummy()) {
                     return part;
                 }
             } else {
-                break;
+                // Reached start of page
+                Page otherPage = score.getPrecedingPage(currentPage);
+
+                if (otherPage != null) {
+                    currentPage = otherPage;
+                    otherSystem = otherPage.getLastSystem();
+                } else {
+                    break; // Reached start of score
+                }
             }
+
+            otherSystem = otherSystem.getPrecedingInPage();
         }
 
-        logger.warn("{} Cannot find real system part with id {}", this, id);
+        logger.warn("{} Cannot find any real system part with id {}", this, id);
 
         return null;
     }

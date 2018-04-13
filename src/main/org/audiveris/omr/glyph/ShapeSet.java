@@ -23,6 +23,7 @@ package org.audiveris.omr.glyph;
 
 import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
+import org.audiveris.omr.ui.Colors;
 import static org.audiveris.omr.glyph.Shape.*;
 
 import org.slf4j.Logger;
@@ -270,11 +271,11 @@ public class ShapeSet
 
     /** Core shapes for barlines. */
     public static final EnumSet<Shape> CoreBarlines = EnumSet.copyOf(
-            Arrays.asList(
-                    Shape.THICK_BARLINE,
-                    Shape.THICK_CONNECTOR,
-                    Shape.THIN_BARLINE,
-                    Shape.THIN_CONNECTOR));
+            Arrays.asList(THICK_BARLINE, THICK_CONNECTOR, THIN_BARLINE, THIN_CONNECTOR));
+
+    /** Beams. */
+    public static final EnumSet<Shape> Beams = EnumSet.copyOf(
+            Arrays.asList(BEAM, BEAM_SMALL, BEAM_HOOK, BEAM_HOOK_SMALL));
 
     //----------------------------------------------------------------------------------------------
     // Below are predefined instances of ShapeSet, meant mainly for UI packaging.
@@ -287,62 +288,48 @@ public class ShapeSet
     //----------------------------------------------------------------------------------------------
     public static final ShapeSet Accidentals = new ShapeSet(
             SHARP,
-            new Color(0x9933ff),
+            Colors.SCORE_MODIFIERS,
             shapesOf(FLAT, NATURAL, SHARP, DOUBLE_SHARP, DOUBLE_FLAT));
 
     public static final ShapeSet Articulations = new ShapeSet(
             ACCENT,
-            new Color(0xff6699),
+            Colors.SCORE_MODIFIERS,
             shapesOf(ACCENT, TENUTO, STACCATO, STACCATISSIMO, STRONG_ACCENT));
 
     public static final ShapeSet Attributes = new ShapeSet(
             PEDAL_MARK,
-            new Color(0x000000),
-            shapesOf(
-                    OTTAVA_ALTA,
-                    OTTAVA_BASSA,
-                    PEDAL_MARK,
-                    PEDAL_UP_MARK,
-                    TUPLET_THREE,
-                    TUPLET_SIX,
-                    ARPEGGIATO));
+            Colors.SCORE_MODIFIERS,
+            shapesOf(OTTAVA_ALTA, OTTAVA_BASSA, PEDAL_MARK, PEDAL_UP_MARK, ARPEGGIATO));
 
     public static final ShapeSet Barlines = new ShapeSet(
             LEFT_REPEAT_SIGN,
-            new Color(0x0000ff),
+            Colors.SCORE_FRAME,
             shapesOf(
-                    CoreBarlines,
-                    shapesOf(
-                            DOUBLE_BARLINE,
-                            FINAL_BARLINE,
-                            REVERSE_FINAL_BARLINE,
-                            LEFT_REPEAT_SIGN,
-                            RIGHT_REPEAT_SIGN,
-                            BACK_TO_BACK_REPEAT_SIGN,
-                            BRACE,
-                            BRACKET,
-                            BRACKET_CONNECTOR,
-                            REPEAT_DOT)));
+                    THICK_BARLINE,
+                    THIN_BARLINE,
+                    DOUBLE_BARLINE,
+                    FINAL_BARLINE,
+                    REVERSE_FINAL_BARLINE,
+                    LEFT_REPEAT_SIGN,
+                    RIGHT_REPEAT_SIGN,
+                    BACK_TO_BACK_REPEAT_SIGN,
+                    BRACE,
+                    BRACKET,
+                    REPEAT_DOT));
 
-    public static final ShapeSet Beams = new ShapeSet(
+    public static final ShapeSet BeamsAndTuplets = new ShapeSet(
             BEAM,
-            new Color(0x33ffff),
-            shapesOf(BEAM, BEAM_SMALL, BEAM_HOOK));
+            Colors.SCORE_NOTES,
+            shapesOf(BEAM /* ,BEAM_SMALL */, BEAM_HOOK, TUPLET_THREE, TUPLET_SIX));
 
     public static final ShapeSet Clefs = new ShapeSet(
             G_CLEF,
-            new Color(0xff99ff),
+            Colors.SCORE_FRAME,
             shapesOf(TrebleClefs, BassClefs, shapesOf(C_CLEF, PERCUSSION_CLEF)));
 
-    /**
-     * <img src="http://0.tqn.com/y/piano/1/U/m/G/-/-/musical-dynamics_MUSIC.png">
-     * <br>
-     * see <a href="http://piano.about.com/od/musicaltermssymbols/ss/2Int_SheetMusic_2.htm">Musical
-     * Dynamics</a>
-     */
     public static final ShapeSet Dynamics = new ShapeSet(
             DYNAMICS_F,
-            new Color(0x009999),
+            Colors.SCORE_MODIFIERS,
             shapesOf(
                     DYNAMICS_P,
                     DYNAMICS_PP,
@@ -358,32 +345,32 @@ public class ShapeSet
 
     public static final ShapeSet Flags = new ShapeSet(
             FLAG_1,
-            new Color(0x99cc00),
+            Colors.SCORE_NOTES,
             shapesOf(new ArrayList<Shape>(FlagsDown), SmallFlags, FlagsUp));
 
     public static final ShapeSet Holds = new ShapeSet(
             FERMATA,
-            new Color(0x888888),
+            Colors.SCORE_MODIFIERS,
             shapesOf(BREATH_MARK, CAESURA, FERMATA, FERMATA_BELOW));
 
     public static final ShapeSet Keys = new ShapeSet(
             KEY_SHARP_3,
-            new Color(0x00ffff),
+            Colors.SCORE_MODIFIERS,
             shapesOf(new ArrayList<Shape>(FlatKeys), SharpKeys));
 
     public static final ShapeSet HeadsAndDot = new ShapeSet(
             NOTEHEAD_BLACK,
-            new Color(0xffcc00),
+            Colors.SCORE_NOTES,
             shapesOf(Heads, shapesOf(AUGMENTATION_DOT)));
 
     public static final ShapeSet Markers = new ShapeSet(
             CODA,
-            new Color(0x888888),
+            Colors.SCORE_FRAME,
             shapesOf(DAL_SEGNO, DA_CAPO, SEGNO, CODA));
 
     public static final ShapeSet Ornaments = new ShapeSet(
             MORDENT,
-            new Color(0xcc3300),
+            Colors.SCORE_MODIFIERS,
             shapesOf(
                     GRACE_NOTE_SLASH,
                     GRACE_NOTE,
@@ -397,7 +384,7 @@ public class ShapeSet
 
     public static final ShapeSet Rests = new ShapeSet(
             QUARTER_REST,
-            new Color(0x99ff66),
+            Colors.SCORE_NOTES,
             shapesOf(
                     LONG_REST,
                     BREVE_REST,
@@ -412,12 +399,12 @@ public class ShapeSet
 
     public static final ShapeSet Times = new ShapeSet(
             TIME_FOUR_FOUR,
-            new Color(0xcc3300),
+            Colors.SCORE_FRAME,
             shapesOf(PartialTimes, WholeTimes)); //, shapesOf(TIME_ZERO, TIME_ONE, CUSTOM_TIME)));
 
     public static final ShapeSet Digits = new ShapeSet(
             DIGIT_1,
-            new Color(0xcc3388),
+            Colors.SCORE_MODIFIERS,
             shapesOf(
                     DIGIT_0,
                     DIGIT_1,
@@ -433,12 +420,12 @@ public class ShapeSet
 
     public static final ShapeSet Pluckings = new ShapeSet(
             PLUCK_P,
-            new Color(0xcc3388),
+            Colors.SCORE_MODIFIERS,
             shapesOf(PLUCK_P, PLUCK_I, PLUCK_M, PLUCK_A));
 
     public static final ShapeSet Romans = new ShapeSet(
             ROMAN_V,
-            new Color(0xcc3388),
+            Colors.SCORE_MODIFIERS,
             shapesOf(
                     ROMAN_I,
                     ROMAN_II,
@@ -455,8 +442,8 @@ public class ShapeSet
 
     public static final ShapeSet Physicals = new ShapeSet(
             LEDGER,
-            new Color(0x9999ff),
-            shapesOf(TEXT, CHARACTER, CLUTTER, SLUR, LEDGER, STEM, ENDING));
+            Colors.SCORE_PHYSICALS,
+            shapesOf(LYRICS, TEXT, CHARACTER, CLUTTER, SLUR, LEDGER, STEM, ENDING));
 
     // =========================================================================
     // Below are EnumSet instances, used programmatically.
@@ -469,7 +456,7 @@ public class ShapeSet
 
     /** Symbols that can be attached to a stem. */
     public static final EnumSet<Shape> StemSymbols = EnumSet.copyOf(
-            shapesOf(StemHeads, Flags.getShapes(), Beams.getShapes()));
+            shapesOf(StemHeads, Flags.getShapes(), Beams));
 
     /** Pedals */
     public static final EnumSet<Shape> Pedals = EnumSet.of(PEDAL_MARK, PEDAL_UP_MARK);
@@ -798,31 +785,6 @@ public class ShapeSet
      * @param col1 a first collection of shapes
      * @param col2 a second collection of shapes
      * @param col3 a third collection of shapes
-     * @return a single collection
-     */
-    public static Collection<Shape> shapesOf (Collection<Shape> col1,
-                                              Collection<Shape> col2,
-                                              Collection<Shape> col3)
-    {
-        Collection<Shape> shapes = (col1 instanceof List) ? new ArrayList<Shape>()
-                : EnumSet.noneOf(Shape.class);
-
-        shapes.addAll(col1);
-        shapes.addAll(col2);
-        shapes.addAll(col3);
-
-        return shapes;
-    }
-
-    //----------//
-    // shapesOf //
-    //----------//
-    /**
-     * Convenient way to build a collection of shapes.
-     *
-     * @param col1 a first collection of shapes
-     * @param col2 a second collection of shapes
-     * @param col3 a third collection of shapes
      * @param col4 a fourth collection of shapes
      * @return a single collection
      */
@@ -838,6 +800,31 @@ public class ShapeSet
         shapes.addAll(col2);
         shapes.addAll(col3);
         shapes.addAll(col4);
+
+        return shapes;
+    }
+
+    //----------//
+    // shapesOf //
+    //----------//
+    /**
+     * Convenient way to build a collection of shapes.
+     *
+     * @param col1 a first collection of shapes
+     * @param col2 a second collection of shapes
+     * @param col3 a third collection of shapes
+     * @return a single collection
+     */
+    public static Collection<Shape> shapesOf (Collection<Shape> col1,
+                                              Collection<Shape> col2,
+                                              Collection<Shape> col3)
+    {
+        Collection<Shape> shapes = (col1 instanceof List) ? new ArrayList<Shape>()
+                : EnumSet.noneOf(Shape.class);
+
+        shapes.addAll(col1);
+        shapes.addAll(col2);
+        shapes.addAll(col3);
 
         return shapes;
     }

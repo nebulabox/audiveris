@@ -37,6 +37,7 @@ import java.util.concurrent.locks.Lock;
 
 import javax.swing.JFrame;
 import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
+import org.audiveris.omr.score.Page;
 
 /**
  * Interface {@code Book} is the root class for handling a physical set of image input
@@ -105,8 +106,9 @@ import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
  * <li>{@link #getScores}</li>
  * </ul></dd>
  *
- * <dt>Samples</dt>
+ * <dt>Symbols</dt>
  * <dd><ul>
+ * <li>{@link #annotate}</li>
  * <li>{@link #getSampleRepository}</li>
  * <li>{@link #getSpecificSampleRepository}</li>
  * <li>{@link #hasAllocatedRepository}</li>
@@ -130,7 +132,7 @@ import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
  * </ul></dd>
  * </dl>
  * <p>
- * <img src="doc-files/Book-Detail.png">
+ * <img src="doc-files/Book-Detail.png" alt="Book detals UML">
  *
  * @author Hervé Bitteur
  */
@@ -143,6 +145,11 @@ public interface Book
     static final String BOOK_INTERNALS = "book.xml";
 
     //~ Methods ------------------------------------------------------------------------------------
+    /**
+     * Write the book symbol annotations.
+     */
+    void annotate ();
+
     /**
      * Delete this book instance, as well as its related resources.
      */
@@ -272,6 +279,14 @@ public interface Book
     SampleRepository getSampleRepository ();
 
     /**
+     * Report the score which contains the provided page.
+     *
+     * @param page provided page
+     * @return containing score (can it be null?)
+     */
+    Score getScore (Page page);
+
+    /**
      * Report the scores (movements) detected in this book.
      *
      * @return the immutable list of scores
@@ -374,7 +389,7 @@ public interface Book
      *
      * @param number sheet number (1-based) within the book
      * @return the path to sheet folder
-     * @throws java.io.IOException
+     * @throws IOException if anything goes wrong
      */
     Path openSheetFolder (int number)
             throws IOException;
@@ -497,7 +512,7 @@ public interface Book
      * Store the book information (global info + stub steps) into book file system.
      *
      * @param root root path of book file system
-     * @throws Exception
+     * @throws Exception if anything goes wrong
      */
     void storeBookInfo (Path root)
             throws Exception;

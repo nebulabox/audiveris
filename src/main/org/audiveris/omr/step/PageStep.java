@@ -24,21 +24,43 @@ package org.audiveris.omr.step;
 import org.audiveris.omr.score.MeasureFixer;
 import org.audiveris.omr.score.Page;
 import org.audiveris.omr.score.PageReduction;
-import org.audiveris.omr.sheet.Part;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SystemInfo;
+import org.audiveris.omr.sheet.rhythm.MeasureStack;
 import org.audiveris.omr.sheet.rhythm.Voices;
-import org.audiveris.omr.sig.SIGraph;
+import org.audiveris.omr.sig.inter.AugmentationDotInter;
+import org.audiveris.omr.sig.inter.BeamHookInter;
+import org.audiveris.omr.sig.inter.BeamInter;
+import org.audiveris.omr.sig.inter.FlagInter;
+import org.audiveris.omr.sig.inter.HeadChordInter;
+import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.LyricItemInter;
 import org.audiveris.omr.sig.inter.LyricLineInter;
+import org.audiveris.omr.sig.inter.RestChordInter;
+import org.audiveris.omr.sig.inter.RestInter;
+import org.audiveris.omr.sig.inter.SentenceInter;
 import org.audiveris.omr.sig.inter.SlurInter;
-import static org.audiveris.omr.util.HorizontalSide.*;
+import org.audiveris.omr.sig.inter.StemInter;
+import org.audiveris.omr.sig.inter.TimeNumberInter;
+import org.audiveris.omr.sig.inter.TimePairInter;
+import org.audiveris.omr.sig.inter.TimeWholeInter;
+import org.audiveris.omr.sig.inter.TupletInter;
+import org.audiveris.omr.sig.ui.InterTask;
+import org.audiveris.omr.sig.ui.StackTask;
+import org.audiveris.omr.sig.ui.UITask;
+import org.audiveris.omr.sig.ui.UITask.OpKind;
+import org.audiveris.omr.sig.ui.UITaskList;
+import org.audiveris.omr.text.TextRole;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
 /**
  * Class {@code PageStep} handles connections between systems in a page.
@@ -60,6 +82,65 @@ public class PageStep
 
     private static final Logger logger = LoggerFactory.getLogger(PageStep.class);
 
+    /** Classes that may impact voices. */
+    private static final Set<Class> forVoices;
+
+    static {
+        forVoices = new HashSet<Class>();
+        forVoices.add(AugmentationDotInter.class);
+        forVoices.add(BeamHookInter.class);
+        forVoices.add(BeamInter.class);
+        forVoices.add(FlagInter.class);
+        forVoices.add(HeadChordInter.class);
+        forVoices.add(HeadInter.class);
+        forVoices.add(RestChordInter.class);
+        forVoices.add(RestInter.class);
+        forVoices.add(SlurInter.class);
+        forVoices.add(StemInter.class);
+        forVoices.add(TimeNumberInter.class);
+        forVoices.add(TimePairInter.class);
+        forVoices.add(TimeWholeInter.class);
+        forVoices.add(TupletInter.class);
+
+        forVoices.add(MeasureStack.class);
+    }
+
+    /** Classes that may impact lyrics. */
+    private static final Set<Class> forLyrics;
+
+    static {
+        forLyrics = new HashSet<Class>();
+        forLyrics.add(LyricItemInter.class);
+        forLyrics.add(LyricLineInter.class);
+    }
+
+    /** Classes that may impact slurs. */
+    private static final Set<Class> forSlurs;
+
+    static {
+        forSlurs = new HashSet<Class>();
+        forSlurs.add(SlurInter.class);
+    }
+
+    /** Classes that may impact parts. */
+    private static final Set<Class> forParts;
+
+    static {
+        forParts = new HashSet<Class>();
+        forParts.add(SentenceInter.class);
+    }
+
+    /** All impacting classes. */
+    private static final Set<Class> impactingClasses;
+
+    static {
+        impactingClasses = new HashSet<Class>();
+        impactingClasses.addAll(forVoices);
+        impactingClasses.addAll(forLyrics);
+        impactingClasses.addAll(forSlurs);
+        impactingClasses.addAll(forParts);
+    }
+
     //~ Constructors -------------------------------------------------------------------------------
     /**
      * Creates a new {@code PageStep} object.
@@ -69,6 +150,9 @@ public class PageStep
     }
 
     //~ Methods ------------------------------------------------------------------------------------
+    //------//
+    // doit //
+    //------//
     @Override
     public void doit (Sheet sheet)
             throws StepException
@@ -77,18 +161,11 @@ public class PageStep
             // Connect parts across systems in the page
             new PageReduction(page).reduce();
 
-            // Inter-system connections
-            for (SystemInfo system : page.getSystems()) {
-                final SIGraph sig = system.getSig();
+            // Inter-system slurs connections
+            page.connectOrphanSlurs();
 
-                connectSystemInitialSlurs(system);
-
-                // Refine syllables across systems
-                for (Inter inter : sig.inters(LyricLineInter.class)) {
-                    LyricLineInter line = (LyricLineInter) inter;
-                    line.refineLyricSyllables();
-                }
-            }
+            // Lyrics
+            refineLyrics(page);
 
             // Refine voices IDs (and thus colors) across all systems of the page
             Voices.refinePage(page);
@@ -98,34 +175,148 @@ public class PageStep
         }
     }
 
-    //---------------------------//
-    // connectSystemInitialSlurs //
-    //---------------------------//
-    /**
-     * Within the current page only, retrieve the connections between the (orphan) slurs
-     * at the beginning of the provided system and the (orphan) slurs at the end of the
-     * previous system if any (within the same page).
-     */
-    private void connectSystemInitialSlurs (SystemInfo system)
+    //--------//
+    // impact //
+    //--------//
+    @Override
+    public void impact (UITaskList seq,
+                        OpKind opKind)
     {
-        SystemInfo prevSystem = system.getPrecedingInPage();
+        logger.debug("PAGE impact {} {}", opKind, seq);
 
-        if (prevSystem != null) {
-            // Examine every part in sequence
-            for (Part part : system.getParts()) {
-                // Connect to ending orphans in preceding system/part (if such part exists)
-                Part precedingPart = part.getPrecedingInPage();
+        // First, determine what will be impacted
+        Map<Page, Impact> map = new LinkedHashMap<Page, Impact>();
 
-                if (precedingPart != null) {
-                    // Links: Slur -> prevSlur
-                    Map<SlurInter, SlurInter> links = part.connectSlursWith(precedingPart);
+        for (UITask task : seq.getTasks()) {
+            if (task instanceof InterTask) {
+                InterTask interTask = (InterTask) task;
+                Inter inter = interTask.getInter();
+                Page page = inter.getSig().getSystem().getPage();
+                Impact impact = map.get(page);
 
-                    for (Entry<SlurInter, SlurInter> entry : links.entrySet()) {
-                        entry.getKey().setExtension(LEFT, entry.getValue());
-                        entry.getValue().setExtension(RIGHT, entry.getKey());
+                if (impact == null) {
+                    map.put(page, impact = new Impact());
+                }
+
+                Class classe = inter.getClass();
+
+                if (isImpactedBy(classe, forParts)) {
+                    if (inter instanceof SentenceInter) {
+                        SentenceInter sentence = (SentenceInter) inter;
+
+                        if (sentence.getRole() == TextRole.PartName) {
+                            impact.onParts = true;
+                        }
                     }
                 }
+
+                if (isImpactedBy(classe, forSlurs)) {
+                    impact.onSlurs = true;
+                }
+
+                if (isImpactedBy(classe, forLyrics)) {
+                    impact.onLyrics = true;
+                }
+
+                if (isImpactedBy(classe, forVoices)) {
+                    impact.onVoices = true;
+                }
+            } else if (task instanceof StackTask) {
+                MeasureStack stack = ((StackTask) task).getStack();
+                Class classe = stack.getClass();
+                Page page = stack.getSystem().getPage();
+                Impact impact = map.get(page);
+
+                if (impact == null) {
+                    map.put(page, impact = new Impact());
+                }
+
+                if (isImpactedBy(classe, forVoices)) {
+                    impact.onVoices = true;
+                }
             }
+        }
+
+        logger.debug("map: {}", map);
+
+        // Second, handle each page impact
+        for (Entry<Page, Impact> entry : map.entrySet()) {
+            Page page = entry.getKey();
+            Impact impact = entry.getValue();
+
+            if (impact.onParts) {
+                new PageReduction(page).reduce();
+            }
+
+            if (impact.onSlurs) {
+                page.connectOrphanSlurs();
+            }
+
+            if (impact.onLyrics) {
+                refineLyrics(page);
+            }
+
+            if (impact.onVoices) {
+                Voices.refinePage(page);
+            }
+        }
+    }
+
+    //--------------//
+    // isImpactedBy //
+    //--------------//
+    @Override
+    public boolean isImpactedBy (Class classe)
+    {
+        return isImpactedBy(classe, impactingClasses);
+    }
+
+    //--------------//
+    // refineLyrics //
+    //--------------//
+    /**
+     * Refine syllables across systems in page
+     *
+     * @param page provided page
+     */
+    private void refineLyrics (Page page)
+    {
+        for (SystemInfo system : page.getSystems()) {
+            for (Inter inter : system.getSig().inters(LyricLineInter.class)) {
+                LyricLineInter line = (LyricLineInter) inter;
+                line.refineLyricSyllables();
+            }
+        }
+    }
+
+    //~ Inner Classes ------------------------------------------------------------------------------
+    //--------//
+    // Impact //
+    //--------//
+    private static class Impact
+    {
+        //~ Instance fields ------------------------------------------------------------------------
+
+        boolean onParts = false;
+
+        boolean onSlurs = false;
+
+        boolean onLyrics = false;
+
+        boolean onVoices = false;
+
+        //~ Methods --------------------------------------------------------------------------------
+        @Override
+        public String toString ()
+        {
+            StringBuilder sb = new StringBuilder("PageImpact{");
+            sb.append("parts:").append(onParts);
+            sb.append(" slurs:").append(onSlurs);
+            sb.append(" lyrics:").append(onLyrics);
+            sb.append(" voices:").append(onVoices);
+            sb.append("}");
+
+            return sb.toString();
         }
     }
 }

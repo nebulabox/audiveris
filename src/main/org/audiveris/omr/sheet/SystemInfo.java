@@ -36,7 +36,7 @@ import org.audiveris.omr.sheet.note.NotePosition;
 import org.audiveris.omr.sheet.rhythm.Measure;
 import org.audiveris.omr.sheet.rhythm.MeasureStack;
 import org.audiveris.omr.sig.SIGraph;
-import org.audiveris.omr.sig.SigValue.InterSet;
+import org.audiveris.omr.sig.SigListener;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.inter.SentenceInter;
 import org.audiveris.omr.util.HorizontalSide;
@@ -55,12 +55,13 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Set;
 
-import javax.xml.bind.Marshaller;
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlAttribute;
@@ -137,7 +138,7 @@ public class SystemInfo
     @XmlList
     @XmlIDREF
     @XmlElement(name = "free-glyphs")
-    private final FreeGlyphs freeGlyphs = new FreeGlyphs();
+    private Set<BasicGlyph> freeGlyphs;
 
     /**
      * Symbol Interpretation Graph for this system.
@@ -189,9 +190,6 @@ public class SystemInfo
     /** Width of the system. */
     private int width = -1;
 
-    /** Very temporary set, used only during SIG marshalling. */
-    private InterSet interSet;
-
     //~ Constructors -------------------------------------------------------------------------------
     /**
      * Create a SystemInfo entity, to register the provided parameters.
@@ -210,6 +208,7 @@ public class SystemInfo
         setStaves(staves);
 
         sig = new SIGraph(this);
+        sig.addGraphListener(new SigListener());
     }
 
     /**
@@ -231,6 +230,10 @@ public class SystemInfo
      */
     public void addFreeGlyph (Glyph glyph)
     {
+        if (freeGlyphs == null) {
+            freeGlyphs = new LinkedHashSet<BasicGlyph>();
+        }
+
         freeGlyphs.add((BasicGlyph) glyph);
     }
 
@@ -271,8 +274,12 @@ public class SystemInfo
             }
 
             for (Inter inter : sig.inters(SentenceInter.class)) {
-                ((SentenceInter) inter).assignStaff(this);
+                SentenceInter sentence = (SentenceInter) inter;
+                sentence.assignStaff(this, sentence.getLocation());
             }
+
+            // Listen to sig modifications
+            sig.addGraphListener(new SigListener());
         } catch (Exception ex) {
             logger.warn("Error in " + getClass() + " afterReload() " + ex, ex);
         }
@@ -286,7 +293,7 @@ public class SystemInfo
      */
     public void clearFreeGlyphs ()
     {
-        freeGlyphs.clear();
+        freeGlyphs = null;
     }
 
     //-----------//
@@ -497,9 +504,11 @@ public class SystemInfo
     {
         List<Glyph> found = new ArrayList<Glyph>();
 
-        for (Glyph glyph : freeGlyphs) {
-            if (glyph.hasGroup(group)) {
-                found.add(glyph);
+        if (freeGlyphs != null) {
+            for (Glyph glyph : freeGlyphs) {
+                if (glyph.hasGroup(group)) {
+                    found.add(glyph);
+                }
             }
         }
 
@@ -540,17 +549,6 @@ public class SystemInfo
     public int getIndexInPage ()
     {
         return getPage().getSystems().indexOf(this);
-    }
-
-    //-------------//
-    // getInterSet //
-    //-------------//
-    /**
-     * @return the interSet
-     */
-    public InterSet getInterSet ()
-    {
-        return interSet;
     }
 
     //---------------------//
@@ -687,7 +685,7 @@ public class SystemInfo
      * if any.
      *
      * @param point the center of the provided note entity
-     * @return the proper note position (staff & pitch)
+     * @return the proper note position (staff &amp; pitch)
      */
     public NotePosition getNoteStaffAt (Point point)
     {
@@ -761,7 +759,7 @@ public class SystemInfo
         if (staff == null) {
             return getFirstPart();
         } else {
-            return getPartOf(staff);
+            return staff.getPart();
         }
     }
 
@@ -798,24 +796,6 @@ public class SystemInfo
     public List<PartGroup> getPartGroups ()
     {
         return partGroups;
-    }
-
-    //-----------//
-    // getPartOf //
-    //-----------//
-    public Part getPartOf (Staff staff)
-    {
-        if (staff == null) {
-            return null;
-        }
-
-        for (Part part : parts) {
-            if (part.getStaves().contains(staff)) {
-                return part;
-            }
-        }
-
-        return null;
     }
 
     //----------//
@@ -1029,7 +1009,7 @@ public class SystemInfo
      * Otherwise, the staff just above if any in system is returned as well as the staff just below
      * if any in system.
      *
-     * @param point
+     * @param point the provided point
      * @return proper sublist of staves (top down)
      */
     public List<Staff> getStavesAround (Point2D point)
@@ -1183,22 +1163,33 @@ public class SystemInfo
      */
     public void removeFreeGlyph (Glyph glyph)
     {
-        freeGlyphs.remove((BasicGlyph) glyph);
+        if (freeGlyphs != null) {
+            freeGlyphs.remove((BasicGlyph) glyph);
+
+            if (freeGlyphs.isEmpty()) {
+                freeGlyphs = null;
+            }
+        }
     }
 
     //---------------------//
     // removeGroupedGlyphs //
     //---------------------//
     /**
-     * Remove all free glyphs that are assigned the provided group.
+     * Remove all free glyphs that are <b>only</b> assigned the provided group.
      *
      * @param group the group of glyphs to remove
      */
     public void removeGroupedGlyphs (Symbol.Group group)
     {
-        for (Iterator<BasicGlyph> it = freeGlyphs.iterator(); it.hasNext();) {
-            if (it.next().hasGroup(group)) {
-                it.remove();
+        if (freeGlyphs != null) {
+            for (Iterator<BasicGlyph> it = freeGlyphs.iterator(); it.hasNext();) {
+                final Glyph glyph = it.next();
+                final EnumSet<Group> glyphGroups = glyph.getGroups();
+
+                if ((glyphGroups.size() == 1) && glyphGroups.contains(group)) {
+                    it.remove();
+                }
             }
         }
     }
@@ -1283,21 +1274,6 @@ public class SystemInfo
         } catch (Exception ex) {
             logger.warn("Error updating coordinates for system#{}", id, ex);
         }
-    }
-
-    //-------------//
-    // setInterSet //
-    //-------------//
-    /**
-     * Trick used during marshalling.
-     * <p>
-     * If interSet is not null, then any inter being marshalled is also included in this set.
-     *
-     * @param interSet the interSet to set
-     */
-    public void setInterSet (InterSet interSet)
-    {
-        this.interSet = interSet;
     }
 
     //---------//
@@ -1422,32 +1398,5 @@ public class SystemInfo
     {
         this.sheet = sheet;
         this.page = page;
-    }
-
-    //---------------//
-    // beforeMarshal //
-    //---------------//
-    @SuppressWarnings("unused")
-    private void beforeMarshal (Marshaller m)
-    {
-        logger.debug("SystemInfo.beforeMarshal for {}", this);
-        setInterSet(new InterSet());
-    }
-
-    //~ Inner Classes ------------------------------------------------------------------------------
-    //------------//
-    // FreeGlyphs //
-    //------------//
-    /**
-     * This is just a trick to present the right class type (BasicGlyph) to IDResolver.
-     * Using plain LinkedHashSet&lt;BasicGlyph&gt; resulted in Object class being presented!
-     *
-     * @see
-     * <a href="http://metro.1045641.n5.nabble.com/JAXB-custom-IDResolver-gets-wrong-target-type-using-Collections-td1058562.html">
-     * This post</a>
-     */
-    private static class FreeGlyphs
-            extends LinkedHashSet<BasicGlyph>
-    {
     }
 }

@@ -38,9 +38,6 @@ import org.audiveris.omr.glyph.Grades;
 import org.audiveris.omr.glyph.Shape;
 
 import static org.audiveris.omr.glyph.Shape.*;
-
-import org.audiveris.omr.glyph.Symbol.Group;
-
 import static org.audiveris.omr.run.Orientation.VERTICAL;
 
 import org.audiveris.omr.run.RunTable;
@@ -56,6 +53,7 @@ import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.ClefInter;
 import org.audiveris.omr.sig.inter.ClefInter.ClefKind;
 import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.Inters;
 import org.audiveris.omr.sig.relation.ClefKeyRelation;
 import org.audiveris.omr.sig.relation.Exclusion;
 import org.audiveris.omr.ui.symbol.Symbol;
@@ -361,7 +359,7 @@ public class ClefBuilder
         // Keep only interesting parts
         purgeParts(parts, isFirstPass);
 
-        system.registerGlyphs(parts, Group.CLEF_PART);
+        system.registerGlyphs(parts, null);
         logger.debug("{} parts: {}", this, parts.size());
 
         return parts;
@@ -374,7 +372,7 @@ public class ClefBuilder
     {
         final double maxContrib = ClefKeyRelation.maxContributionForClef();
         final List<ClefInter> inters = new ArrayList<ClefInter>(bestMap.values());
-        Collections.sort(inters, Inter.byReverseGrade);
+        Collections.sort(inters, Inters.byReverseGrade);
 
         interLoop:
         for (int i = 0; i < inters.size(); i++) {
@@ -442,7 +440,7 @@ public class ClefBuilder
     {
         // Sort clefs by decreasing grade
         final List<ClefInter> clefList = new ArrayList<ClefInter>(clefSet);
-        Collections.sort(clefList, Inter.byReverseGrade);
+        Collections.sort(clefList, Inters.byReverseGrade);
 
         for (int idx = 0; idx < clefList.size(); idx++) {
             final ClefInter inter = clefList.get(idx);
@@ -451,7 +449,7 @@ public class ClefBuilder
             // so use glyph centroid for a better positioning
             // For inter bounds, use font-based symbol bounds rather than glyph bounds
             //TODO: we could also check histogram right after clef end, looking for a low point?
-            Rectangle clefBox = inter.getSymbolBounds(scale.getInterline());
+            Rectangle clefBox = inter.getSymbolBounds(staff.getSpecificInterline());
             Symbol symbol = Symbols.getSymbol(inter.getShape());
             Point symbolCentroid = symbol.getCentroid(clefBox);
             Point glyphCentroid = inter.getGlyph().getCentroid();
@@ -492,7 +490,7 @@ public class ClefBuilder
                 sig.computeContextualGrade(clef);
             }
 
-            Collections.sort(clefs, Inter.byReverseBestGrade);
+            Collections.sort(clefs, Inters.byReverseBestGrade);
 
             // Pickup the first one as header clef
             ClefInter bestClef = clefs.get(0);
@@ -501,7 +499,7 @@ public class ClefBuilder
 
             // Delete the other clef candidates
             for (Inter other : clefs.subList(1, clefs.size())) {
-                other.delete();
+                other.remove();
             }
         }
     }
@@ -688,14 +686,14 @@ public class ClefBuilder
                     glyph,
                     staff.getSpecificInterline(),
                     params.maxEvalRank,
-                    Grades.clefMinGrade / Inter.intrinsicRatio,
+                    Grades.clefMinGrade / Grades.intrinsicRatio,
                     null);
 
             for (Evaluation eval : evals) {
                 final Shape shape = eval.shape;
 
                 if (HEADER_CLEF_SHAPES.contains(shape)) {
-                    final double grade = Inter.intrinsicRatio * eval.grade;
+                    final double grade = Grades.intrinsicRatio * eval.grade;
                     ClefKind kind = ClefInter.kindOf(glyph, shape, staff);
                     ClefInter bestInter = bestMap.get(kind);
 

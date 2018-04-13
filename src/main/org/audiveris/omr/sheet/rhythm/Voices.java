@@ -30,6 +30,7 @@ import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.AbstractChordInter;
 import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.Inters;
 import org.audiveris.omr.sig.inter.SlurInter;
 import org.audiveris.omr.sig.relation.Relation;
 import org.audiveris.omr.sig.relation.SlurHeadRelation;
@@ -38,7 +39,6 @@ import static org.audiveris.omr.util.HorizontalSide.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -115,7 +115,7 @@ public abstract class Voices
 
                 AbstractChordInter c2 = vc2.chord;
 
-                return Inter.byOrdinate.compare(c1, c2);
+                return Inters.byOrdinate.compare(c1, c2);
             }
 
             // No common slot found, use index of first slot for each voice
@@ -127,7 +127,7 @@ public abstract class Voices
             AbstractChordInter c1 = v1.getFirstChord();
             AbstractChordInter c2 = v2.getFirstChord();
 
-            return Inter.byOrdinate.compare(c1, c2);
+            return Inters.byOrdinate.compare(c1, c2);
         }
     };
 
@@ -142,6 +142,8 @@ public abstract class Voices
      */
     public static void refinePage (Page page)
     {
+        logger.debug("PageStep.refinePage");
+
         final SystemInfo firstSystem = page.getFirstSystem();
         final SlurAdapter systemSlurAdapter = new SlurAdapter()
         {
@@ -197,33 +199,60 @@ public abstract class Voices
                     final LogicalPart logicalPart = page.getLogicalPartById(scorePart.getId());
 
                     if (logicalPart == null) {
-                        continue; // scorePart not found in this page
+                        continue; // logical part not found in this page
                     }
 
                     final Part part = page.getFirstSystem().getPartById(logicalPart.getId());
 
                     if (part == null) {
-                        continue; // logicalPart not found in the first system
+                        continue; // logical part not found in the first system of this page
                     }
 
-                    final Map<SlurInter, SlurInter> links = getLinks(logicalPart, page, prevSystem);
-                    final SlurAdapter pageSlurAdapter = new SlurAdapter()
-                    {
-                        @Override
-                        public SlurInter getInitialSlur (SlurInter slur)
+                    final List<SlurInter> orphans = part.getSlurs(SlurInter.isBeginningOrphan);
+
+                    final Part precedingPart = prevSystem.getPartById(
+                            logicalPart.getId());
+
+                    if (precedingPart != null) {
+                        final List<SlurInter> precOrphans = precedingPart.getSlurs(
+                                SlurInter.isEndingOrphan);
+
+                        final Map<SlurInter, SlurInter> links = part.getCrossSlurLinks(
+                                precedingPart); // Links: Slur -> prevSlur
+
+                        // Apply the links possibilities
+                        for (Map.Entry<SlurInter, SlurInter> entry : links.entrySet()) {
+                            final SlurInter slur = entry.getKey();
+                            final SlurInter prevSlur = entry.getValue();
+
+                            slur.checkTie(prevSlur);
+                        }
+
+                        // Purge orphans across pages
+                        orphans.removeAll(links.keySet());
+                        precOrphans.removeAll(links.values());
+                        SlurInter.discardOrphans(precOrphans, RIGHT);
+
+                        final SlurAdapter pageSlurAdapter = new SlurAdapter()
                         {
-                            return links.get(slur);
-                        }
-                    };
+                            @Override
+                            public SlurInter getInitialSlur (SlurInter slur)
+                            {
+                                return links.get(slur);
+                            }
+                        };
 
-                    for (Voice voice : part.getFirstMeasure().getVoices()) {
-                        Integer tiedId = getTiedId(voice, pageSlurAdapter);
+                        for (Voice voice : part.getFirstMeasure().getVoices()) {
+                            Integer tiedId = getTiedId(voice, pageSlurAdapter);
 
-                        if ((tiedId != null) && (voice.getId() != tiedId)) {
-                            logicalPart.swapVoiceId(page, voice.getId(), tiedId);
-                            modifs++;
+                            if ((tiedId != null) && (voice.getId() != tiedId)) {
+                                logicalPart.swapVoiceId(page, voice.getId(), tiedId);
+                                modifs++;
+                            }
                         }
                     }
+
+                    SlurInter.discardOrphans(orphans, LEFT);
                 }
             }
 
@@ -241,7 +270,7 @@ public abstract class Voices
      * <p>
      * When this method is called, initial IDs have been assigned according to voice creation
      * (whole voices first, then slot voices, with each voice remaining in its part).
-     * See {@link Slot#buildVoices(java.util.List)} and {@link Slot#assignVoices()} methods.
+     * See {@link Slot#buildVoices(java.util.List)} method.
      * <p>
      * Here we simply rename the IDs from top to bottom (roughly), within each part.
      *
@@ -298,35 +327,6 @@ public abstract class Voices
         }
     }
 
-    //----------//
-    // getLinks //
-    //----------//
-    /**
-     * Within the same logical part, retrieve the connections between the (orphan) slurs
-     * at beginning of this page and the (orphan) slurs at end of the previous page.
-     *
-     * @param logicalPart     the logicalPart to connect
-     * @param page            the containing page
-     * @param precedingSystem the last system of previous page, if any
-     * @return the links (slur-> prevSlur), perhaps empty but not null
-     */
-    private static Map<SlurInter, SlurInter> getLinks (LogicalPart logicalPart,
-                                                       Page page,
-                                                       SystemInfo precedingSystem)
-    {
-        if (precedingSystem != null) {
-            final SystemInfo firstSystem = page.getFirstSystem();
-            final Part part = firstSystem.getPartById(logicalPart.getId());
-            final Part precedingPart = precedingSystem.getPartById(logicalPart.getId());
-
-            if ((part != null) && (precedingPart != null)) {
-                return part.connectSlursWith(precedingPart); // Links: Slur -> prevSlur
-            }
-        }
-
-        return Collections.emptyMap();
-    }
-
     //-----------//
     // getTiedId //
     //-----------//
@@ -363,7 +363,10 @@ public abstract class Voices
                                     final Voice leftVoice = left.getVoice();
                                     logger.debug("{} ties {} over to {}", slur, voice, leftVoice);
 
-                                    return leftVoice.getId();
+                                    // Can be null if rhythm could not process the whole measure
+                                    if (leftVoice != null) {
+                                        return leftVoice.getId();
+                                    }
                                 }
                             }
                         }

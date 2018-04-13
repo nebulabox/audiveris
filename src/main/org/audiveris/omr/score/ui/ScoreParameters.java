@@ -29,7 +29,7 @@ import org.audiveris.omr.image.AdaptiveDescriptor;
 import org.audiveris.omr.image.FilterDescriptor;
 import org.audiveris.omr.image.FilterKind;
 import org.audiveris.omr.image.GlobalDescriptor;
-import org.audiveris.omr.plugin.PluginManager;
+import org.audiveris.omr.plugin.PluginsManager;
 import org.audiveris.omr.score.LogicalPart;
 import org.audiveris.omr.score.MidiAbstractions;
 import org.audiveris.omr.score.PartData;
@@ -73,9 +73,8 @@ import javax.swing.event.ListSelectionListener;
 /**
  * Class {@code ScoreParameters} is a dialog that allows the user to easily manage the
  * most frequent parameters.
- * <p>
  * <div style="float: right;">
- * <img src="doc-files/ScoreParameters.png">
+ * <img src="doc-files/ScoreParameters.png" alt="Score parameters dialog">
  * </div>
  *
  * <p>
@@ -1143,11 +1142,11 @@ public class ScoreParameters
         //~ Constructors ---------------------------------------------------------------------------
         public PluginPane ()
         {
-            super("Plugin", null, null, null, PluginManager.defaultPluginId);
+            super("Plugin", null, null, null, PluginsManager.defaultPluginId);
 
             // ComboBox for triggered step
             pluginCombo = new JComboBox<String>(
-                    PluginManager.getInstance().getPluginIds().toArray(new String[0]));
+                    PluginsManager.getInstance().getPluginIds().toArray(new String[0]));
             pluginCombo.setToolTipText("Default plugin to be launched");
         }
 

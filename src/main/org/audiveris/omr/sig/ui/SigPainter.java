@@ -30,8 +30,8 @@ import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.AbstractBeamInter;
-import org.audiveris.omr.sig.inter.AbstractChordInter;
 import org.audiveris.omr.sig.inter.AbstractFlagInter;
+import org.audiveris.omr.sig.inter.AbstractInterVisitor;
 import org.audiveris.omr.sig.inter.ArpeggiatoInter;
 import org.audiveris.omr.sig.inter.BarConnectorInter;
 import org.audiveris.omr.sig.inter.BarlineInter;
@@ -42,9 +42,7 @@ import org.audiveris.omr.sig.inter.ClefInter;
 import org.audiveris.omr.sig.inter.EndingInter;
 import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.Inter;
-import org.audiveris.omr.sig.inter.InterVisitor;
 import org.audiveris.omr.sig.inter.KeyAlterInter;
-import org.audiveris.omr.sig.inter.KeyInter;
 import org.audiveris.omr.sig.inter.LedgerInter;
 import org.audiveris.omr.sig.inter.SentenceInter;
 import org.audiveris.omr.sig.inter.SlurInter;
@@ -87,11 +85,19 @@ import java.util.Set;
 
 /**
  * Class {@code SigPainter} paints all the {@link Inter} instances of a SIG.
+ * <p>
+ * Its life cycle ends with the painting of a sheet.
+ * <p>
+ * Remarks on no-op visit() for:<ul>
+ * <li>AbstractChordInter: Notes and stem are painted on their own
+ * <li>KeyInter: Each key item is painted on its own
+ * <li>WordInter: Painting is handled from sentence
+ * </ul>
  *
  * @author Hervé Bitteur
  */
 public class SigPainter
-        implements InterVisitor
+        extends AbstractInterVisitor
 {
     //~ Static fields/initializers -----------------------------------------------------------------
 
@@ -109,6 +115,12 @@ public class SigPainter
 
     /** Music font for small staves, if any. */
     private final MusicFont musicFontSmall;
+
+    /** Music font for heads in large staves. */
+    private final MusicFont musicHeadFontLarge;
+
+    /** Music font for heads in small staves, if any. */
+    private final MusicFont musicHeadFontSmall;
 
     /** Global stroke for staff lines. */
     private final Stroke lineStroke;
@@ -135,11 +147,17 @@ public class SigPainter
         // Determine proper music fonts
         if (scale == null) {
             musicFontLarge = musicFontSmall = null;
+            musicHeadFontLarge = musicHeadFontSmall = null;
         } else {
-            musicFontLarge = MusicFont.getFont(scale.getInterline());
+            // Standard size
+            final int large = scale.getInterline();
+            musicFontLarge = MusicFont.getBaseFont(large);
+            musicHeadFontLarge = MusicFont.getHeadFont(scale, large);
 
-            Integer small = scale.getSmallInterline();
-            musicFontSmall = (small != null) ? MusicFont.getFont(small) : null;
+            // Smaller size
+            final Integer small = scale.getSmallInterline();
+            musicFontSmall = (small != null) ? MusicFont.getBaseFont(small) : null;
+            musicHeadFontSmall = (small != null) ? MusicFont.getHeadFont(scale, small) : null;
         }
 
         // Determine lines parameters
@@ -163,7 +181,7 @@ public class SigPainter
         Set<Inter> copy = new LinkedHashSet<Inter>(sig.vertexSet());
 
         for (Inter inter : copy) {
-            if (!inter.isDeleted()) {
+            if (!inter.isRemoved()) {
                 Rectangle bounds = inter.getBounds();
 
                 if (bounds != null) {
@@ -191,17 +209,8 @@ public class SigPainter
             setColor(beam);
             g.fill(beam.getArea());
         } catch (Exception ex) {
-            logger.warn("Error painting {} {}", beam, ex.toString());
+            logger.warn("Error painting {} {}", beam, ex.toString(), ex);
         }
-    }
-
-    //-------//
-    // visit //
-    //-------//
-    @Override
-    public void visit (AbstractChordInter inter)
-    {
-        // Nothing: let note & stem be painted on their own
     }
 
     //-------//
@@ -420,21 +429,28 @@ public class SigPainter
     @Override
     public void visit (Inter inter)
     {
-        if (inter.getShape() == null) {
+        final Shape shape = inter.getShape();
+
+        if (shape == null) {
             return;
         }
 
-        final ShapeSymbol symbol = Symbols.getSymbol(inter.getShape());
+        final ShapeSymbol symbol = Symbols.getSymbol(shape);
         setColor(inter);
 
         if (symbol != null) {
+            final Staff staff = inter.getStaff();
             final MusicFont font;
 
-            if (inter.getShape() == Shape.NOTEHEAD_VOID) {
-                font = MusicFont.getFont(
-                        inter.getStaff().getSpecificInterline() + MusicFont.NOTEHEAD_VOID_EXTENT);
+            if (shape.isHead()) {
+                //                if (shape == Shape.NOTEHEAD_VOID) {
+                //                    font = getMusicVoidFont(staff);
+                //                } else {
+                font = getMusicHeadFont(staff);
+
+                //                }
             } else {
-                font = getMusicFont(inter.getStaff());
+                font = getMusicFont(staff);
             }
 
             final Point center = GeoUtil.centerOf(inter.getBounds());
@@ -475,15 +491,6 @@ public class SigPainter
     // visit //
     //-------//
     @Override
-    public void visit (KeyInter key)
-    {
-        // Nothing: Let each key item be painted on its own
-    }
-
-    //-------//
-    // visit //
-    //-------//
-    @Override
     public void visit (LedgerInter ledger)
     {
         try {
@@ -515,8 +522,6 @@ public class SigPainter
     @Override
     public void visit (SentenceInter sentence)
     {
-        setColor(sentence);
-
         FontInfo lineMeanFont = sentence.getMeanFont();
 
         for (Inter member : sentence.getMembers()) {
@@ -585,20 +590,11 @@ public class SigPainter
         g.draw(wedge.getLine2());
     }
 
-    //-------//
-    // visit //
-    //-------//
-    @Override
-    public void visit (WordInter word)
-    {
-        // Nothing, painting is handled from sentence
-    }
-
     //--------------//
     // getMusicFont //
     //--------------//
     /**
-     * Select proper size of music font, according to related staff size.
+     * Select proper size of music font, according to provided staff size.
      *
      * @param small true for small staff
      * @return selected music font
@@ -612,7 +608,7 @@ public class SigPainter
     // getMusicFont //
     //--------------//
     /**
-     * Select proper size of music font, according to related staff size.
+     * Select proper size of music font, according to provided staff.
      *
      * @param staff related staff
      * @return selected music font
@@ -622,6 +618,51 @@ public class SigPainter
         return getMusicFont((staff != null) ? staff.isSmall() : false);
     }
 
+    //------------------//
+    // getMusicHeadFont //
+    //------------------//
+    protected MusicFont getMusicHeadFont (Staff staff)
+    {
+        return getMusicHeadFont((staff != null) ? staff.isSmall() : false);
+    }
+
+    //------------------//
+    // getMusicHeadFont //
+    //------------------//
+    protected MusicFont getMusicHeadFont (boolean small)
+    {
+        return small ? musicHeadFontSmall : musicHeadFontLarge;
+    }
+
+    //
+    //    //------------------//
+    //    // getMusicVoidFont //
+    //    //------------------//
+    //    /**
+    //     * Select proper size of music font for void heads, according to provided staff.
+    //     *
+    //     * @param small true for small staff
+    //     * @return selected music font
+    //     */
+    //    protected MusicFont getMusicVoidFont (boolean small)
+    //    {
+    //        return small ? musicVoidFontSmall : musicVoidFontLarge;
+    //    }
+    //
+    //    //------------------//
+    //    // getMusicVoidFont //
+    //    //------------------//
+    //    /**
+    //     * Select proper size of music font for void heads, according to provided staff size.
+    //     *
+    //     * @param staff related staff
+    //     * @return selected music font
+    //     */
+    //    protected MusicFont getMusicVoidFont (Staff staff)
+    //    {
+    //        return getMusicVoidFont((staff != null) ? staff.isSmall() : false);
+    //    }
+    //
     //-------//
     // paint //
     //-------//
@@ -664,6 +705,7 @@ public class SigPainter
             Font font = new TextFont(lineMeanFont);
             FontRenderContext frc = g.getFontRenderContext();
             TextLayout layout = new TextLayout(word.getValue(), font, frc);
+            setColor(word);
 
             if (word.getValue().length() > 2) {
                 paint(layout, word.getLocation(), BASELINE_LEFT);

@@ -66,7 +66,11 @@ public enum TextRole
     /** Copyright notice. */
     Rights,
     /** Chord mark. */
-    ChordName;
+    ChordName,
+    /** Ending number, such as "1" or "1,2". */
+    EndingNumber,
+    /** Ending text, when different from number. */
+    EndingText;
 
     private static final Constants constants = new Constants();
 
@@ -95,12 +99,14 @@ public enum TextRole
      * For the time being, this is a simple algorithm based on sentence location within the sheet,
      * augmented by valid chord name, etc.
      *
-     * @param line   the sentence
-     * @param system the containing system
+     * @param line          the sentence
+     * @param system        the containing system
+     * @param lyricsAllowed false for manual mode, forbidding lyrics
      * @return the role information inferred for the provided sentence glyph
      */
     public static TextRole guessRole (TextLine line,
-                                      SystemInfo system)
+                                      SystemInfo system,
+                                      boolean lyricsAllowed)
     {
         if (line == null) {
             return null;
@@ -118,24 +124,6 @@ public enum TextRole
 
         int chordCount = 0;
 
-        //
-        //        for (TextWord word : line.getWords()) {
-        //            //            // At least one word/glyph with a role manually assigned
-        //            //            Glyph glyph = word.getGlyph();
-        //            //
-        //            //            if (glyph != null) {
-        //            //                if (glyph.getManualRole() != null) {
-        //            //                    return glyph.getManualRole();
-        //            //                }
-        //            //            }
-        //            //
-        //            //
-        //            //            // Word that could be a chord symbol?
-        //            //            if (word.guessChordInfo() != null) {
-        //            //                chordCount++;
-        //            //            }
-        //        }
-        //
         // Is line made entirely of potential chord symbols?
         boolean isAllChord = chordCount == line.getWords().size();
 
@@ -250,7 +238,9 @@ public enum TextRole
 
             if (leftOfStaves) {
                 return PartName;
-            } else if ((partPosition == StaffPosition.BELOW_STAVES) && !isMainlyItalic) {
+            } else if (lyricsAllowed
+                       && (partPosition == StaffPosition.BELOW_STAVES)
+                       && !isMainlyItalic) {
                 return Lyrics;
             } else if (!tinySentence) {
                 return Direction;
@@ -271,7 +261,9 @@ public enum TextRole
             }
 
             if (part.getStaves().size() == 1) {
-                if ((partPosition == StaffPosition.BELOW_STAVES) && !isMainlyItalic) {
+                if (lyricsAllowed
+                    && (partPosition == StaffPosition.BELOW_STAVES)
+                    && !isMainlyItalic) {
                     return Lyrics;
                 }
             }

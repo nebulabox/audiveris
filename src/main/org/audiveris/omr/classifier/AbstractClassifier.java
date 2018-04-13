@@ -76,8 +76,9 @@ import javax.xml.bind.JAXBException;
  * <li>If not found, it falls back reading the default definition from the application resource,
  * reading the 'res' folder in the application program area.
  * </ol>
+ * <p>
  * After any user training, the data is stored as the custom definition in the user local area,
- * which will be picked up first when the application is run again.</p>
+ * which will be picked up first when the application is run again.
  *
  * @param <M> precise model class to be used
  *
@@ -351,7 +352,7 @@ public abstract class AbstractClassifier<M extends Object>
      *
      * @param root non-null root path of file system
      * @return the loaded model
-     * @throws Exception
+     * @throws Exception if something goes wrong
      */
     protected abstract M loadModel (Path root)
             throws Exception;
@@ -363,7 +364,7 @@ public abstract class AbstractClassifier<M extends Object>
      * Store the model to disk.
      *
      * @param modelPath path to model file
-     * @throws Exception
+     * @throws Exception if something goes wrong
      */
     protected abstract void storeModel (Path modelPath)
             throws Exception;
@@ -376,8 +377,8 @@ public abstract class AbstractClassifier<M extends Object>
      *
      * @param root the root path to file system
      * @return the loaded Norms instance, or exception is thrown
-     * @throws IOException
-     * @throws JAXBException
+     * @throws IOException if something goes wrong during IO operations
+     * @throws JAXBException if something goes wrong with XML deserialization
      */
     protected Norms loadNorms (Path root)
             throws IOException, JAXBException
@@ -416,7 +417,7 @@ public abstract class AbstractClassifier<M extends Object>
     /**
      * Store the engine internals, always as user files.
      *
-     * @param fileName file name for classifier data (model & norms)
+     * @param fileName file name for classifier data (model &amp; norms)
      */
     protected void store (String fileName)
     {
@@ -448,7 +449,7 @@ public abstract class AbstractClassifier<M extends Object>
      * Store the norms based on training samples.
      *
      * @param root path to root of file system
-     * @throws IOException
+     * @throws IOException if something goes wrong during IO operations
      */
     protected void storeNorms (Path root)
             throws IOException

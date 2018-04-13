@@ -21,6 +21,7 @@
 // </editor-fold>
 package org.audiveris.omr.sheet.rhythm;
 
+import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.math.GeoUtil;
 import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.score.Page;
@@ -35,6 +36,7 @@ import org.audiveris.omr.sig.inter.AbstractChordInter;
 import org.audiveris.omr.sig.inter.AbstractTimeInter;
 import org.audiveris.omr.sig.inter.HeadChordInter;
 import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.RestChordInter;
 import org.audiveris.omr.sig.inter.TupletInter;
 import org.audiveris.omr.util.HorizontalSide;
 import static org.audiveris.omr.util.HorizontalSide.*;
@@ -81,7 +83,7 @@ import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
  * <li>A pickup measure has ID 0, instead of 1.</li>
  * <li>A special value (Xn) is used for second half repeats, when first half repeat is n.</li>
  * <li>Courtesy measures that may be found at end of system (containing just cautionary key or time
- * signatures) are simply ignored, hence they have no ID.</li>
+ * signatures) have an ID with C suffix (nC).</li>
  * </ul>
  * <li>IDs, as exported in MusicXML, combine the page-based IDs to provide score-based (absolute)
  * IDs.</li>
@@ -99,10 +101,16 @@ public class MeasureStack
 
     private static final Logger logger = LoggerFactory.getLogger(MeasureStack.class);
 
-    /** String prefix for a second half id. */
-    private static final String SH_STRING = "X";
+    /** String prefix for a second half id: {@value}. */
+    public static final String SECOND_HALF_PREFIX = "X";
+
+    /** String suffix for a cautionary id: {@value}. */
+    public static final String CAUTIONARY_SUFFIX = "C";
 
     //~ Enumerations -------------------------------------------------------------------------------
+    /**
+     * All special kinds of measures.
+     */
     public enum Special
     {
         //~ Enumeration constant initializers ------------------------------------------------------
@@ -130,15 +138,11 @@ public class MeasureStack
     @XmlAttribute
     private int right;
 
-    /** Unassigned tuplets within stack. */
-    @XmlElementRef
-    private final Set<TupletInter> stackTuplets = new LinkedHashSet<TupletInter>();
-
     /** Sequence of time slots within the measure, from left to right. */
     @XmlElementRef
     private final List<Slot> slots = new ArrayList<Slot>();
 
-    /** Flag for special measure. */
+    /** Indication for special measure stack. */
     @XmlAttribute
     private Special special;
 
@@ -152,7 +156,13 @@ public class MeasureStack
     @XmlJavaTypeAdapter(Rational.Adapter.class)
     private Rational expectedDuration;
 
-    /** Actual measure stack duration, based on durations of contained chords. */
+    /**
+     * Actual measure stack duration, based on durations of contained chords.
+     * If the stack contains no note (head or rest), actual duration is ZERO.
+     * If the stack contains only whole rest(s), actual duration is given by current time signature.
+     * Otherwise, duration is computed from contained slots and voices.
+     * If stack timing fails for whatever reason, actual duration may be left as null.
+     */
     @XmlAttribute(name = "duration")
     @XmlJavaTypeAdapter(Rational.Adapter.class)
     private Rational actualDuration;
@@ -176,6 +186,9 @@ public class MeasureStack
 
     /** Vertical sequence of (Part) measures, from top to bottom. */
     private final List<Measure> measures = new ArrayList<Measure>();
+
+    /** Unassigned tuplets within stack. */
+    private final Set<TupletInter> stackTuplets = new LinkedHashSet<TupletInter>();
 
     //~ Constructors -------------------------------------------------------------------------------
     /**
@@ -205,13 +218,16 @@ public class MeasureStack
         final Part part = inter.getPart();
 
         if (part != null) {
-            int partIndex = system.getParts().indexOf(part);
-            Measure measure = measures.get(partIndex);
+            Measure measure = getMeasureAt(part);
             measure.addInter(inter);
+
+            if (inter instanceof TupletInter) {
+                stackTuplets.remove((TupletInter) inter);
+            }
         } else if (inter instanceof TupletInter) {
             stackTuplets.add((TupletInter) inter);
         } else {
-            throw new IllegalStateException("No part for " + inter);
+            logger.debug("No part yet for {}", inter);
         }
     }
 
@@ -309,7 +325,7 @@ public class MeasureStack
     // clearFrats //
     //------------//
     /**
-     * Get rid of all FRAT inters (both good & poor) in this stack, before a new
+     * Get rid of all FRAT inters (both good and poor) in this stack, before a new
      * configuration is installed.
      */
     public void clearFrats ()
@@ -432,15 +448,12 @@ public class MeasureStack
     /**
      * Report the duration of this measure stack , as computed from its contained voices.
      *
-     * @return the (actual) measure stack duration, or 0 if no rest / note exists in this stack
+     * @return the (actual) measure stack duration, 0 if no rest / note exists in this stack,
+     *         null if it could not be computed.
      */
     public Rational getActualDuration ()
     {
-        if (actualDuration != null) {
-            return actualDuration;
-        } else {
-            return Rational.ZERO;
-        }
+        return actualDuration;
     }
 
     //-----------------//
@@ -498,35 +511,6 @@ public class MeasureStack
         }
 
         return bestSlot;
-    }
-
-    //--------------------//
-    // getCurrentDuration //
-    //--------------------//
-    /**
-     * Report the current duration for this measure, as computed from current content in
-     * terms of slots and chords.
-     *
-     * @return the current measure duration
-     */
-    public Rational getCurrentDuration ()
-    {
-        Rational measureDur = Rational.ZERO;
-
-        // Whole/multi rests are handled outside of slots
-        for (Slot slot : slots) {
-            if (slot.getTimeOffset() != null) {
-                for (AbstractChordInter chord : slot.getChords()) {
-                    Rational chordEnd = slot.getTimeOffset().plus(chord.getDuration());
-
-                    if (chordEnd.compareTo(measureDur) > 0) {
-                        measureDur = chordEnd;
-                    }
-                }
-            }
-        }
-
-        return measureDur;
     }
 
     //-------------------------//
@@ -703,7 +687,7 @@ public class MeasureStack
     //------------//
     /**
      * Report the numeric value of the measure id.
-     * Note that first (n) & second (Xn) measure halves share the same numeric value n.
+     * Note that first (n) and second (Xn) measure halves share the same numeric value n.
      *
      * @return the numeric value of measure id
      */
@@ -807,7 +791,8 @@ public class MeasureStack
     public String getPageId ()
     {
         if (id != null) {
-            return ((special == Special.SECOND_HALF) ? SH_STRING : "") + id;
+            return ((special == Special.SECOND_HALF) ? SECOND_HALF_PREFIX : "") + id
+                   + (isCautionary() ? CAUTIONARY_SUFFIX : "");
         }
 
         // No id defined yet
@@ -864,35 +849,6 @@ public class MeasureStack
         return null;
     }
 
-    //
-    //    //---------------//
-    //    // getRestChords //
-    //    //---------------//
-    //    public Collection<AbstractChordInter> getRestChords ()
-    //    {
-    //        List<AbstractChordInter> rests = new ArrayList<AbstractChordInter>();
-    //
-    //        for (Measure measure : measures) {
-    //            rests.addAll(measure.getRestChords());
-    //        }
-    //
-    //        return rests;
-    //    }
-    //
-    //    //------------//
-    //    // getRhythms //
-    //    //------------//
-    //    public Collection<Inter> getRhythms ()
-    //    {
-    //        List<Inter> rhythms = new ArrayList<Inter>();
-    //
-    //        for (Measure measure : measures) {
-    //            rhythms.addAll(measure.getRhythms());
-    //        }
-    //
-    //        return rhythms;
-    //    }
-    //
     //------------//
     // getScoreId //
     //------------//
@@ -911,7 +867,8 @@ public class MeasureStack
         final Page page = system.getPage();
         final int pageMeasureIdOffset = score.getMeasureIdOffset(page);
 
-        return ((special == Special.SECOND_HALF) ? SH_STRING : "") + (pageMeasureIdOffset + id);
+        return ((special == Special.SECOND_HALF) ? SECOND_HALF_PREFIX : "")
+               + (pageMeasureIdOffset + id);
     }
 
     //----------//
@@ -925,6 +882,38 @@ public class MeasureStack
     public List<Slot> getSlots ()
     {
         return slots;
+    }
+
+    //------------------//
+    // getSlotsDuration //
+    //------------------//
+    /**
+     * Report the duration for this measure, as computed from content in terms of slots
+     * and chords.
+     * <p>
+     * <b>NOTA</b>: if measure has no slot (case of a whole rest or case of an empty stack),
+     * result is ZERO.
+     *
+     * @return the measure duration as computed on slots and chords
+     */
+    public Rational getSlotsDuration ()
+    {
+        Rational measureDur = Rational.ZERO;
+
+        // Whole/multi rests are handled outside of slots
+        for (Slot slot : slots) {
+            if (slot.getTimeOffset() != null) {
+                for (AbstractChordInter chord : slot.getChords()) {
+                    Rational chordEnd = slot.getTimeOffset().plus(chord.getDuration());
+
+                    if (chordEnd.compareTo(measureDur) > 0) {
+                        measureDur = chordEnd;
+                    }
+                }
+            }
+        }
+
+        return measureDur;
     }
 
     //-----------------------//
@@ -1132,10 +1121,16 @@ public class MeasureStack
     //--------------------//
     public Set<AbstractChordInter> getWholeRestChords ()
     {
-        Set<AbstractChordInter> set = new LinkedHashSet<AbstractChordInter>();
+        final Set<AbstractChordInter> set = new LinkedHashSet<AbstractChordInter>();
 
         for (Measure measure : measures) {
-            set.addAll(measure.getWholeRestChords());
+            for (RestChordInter chord : measure.getRestChords()) {
+                final List<Inter> members = chord.getMembers();
+
+                if (!members.isEmpty() && (members.get(0).getShape() == Shape.WHOLE_REST)) {
+                    set.add(chord);
+                }
+            }
         }
 
         return set;
@@ -1289,7 +1284,11 @@ public class MeasureStack
 
         // Merge the stacks data
         right = rightStack.right;
-        actualDuration = this.getActualDuration().plus(rightStack.getActualDuration());
+
+        if (rightStack.actualDuration != null) {
+            actualDuration = (actualDuration == null) ? rightStack.actualDuration
+                    : actualDuration.plus(rightStack.actualDuration);
+        }
 
         // Beware, merged slots must have their stack & xOffset updated accordingly
         slots.addAll(rightStack.slots);
@@ -1328,15 +1327,15 @@ public class MeasureStack
 
                 for (Slot slot : slots) {
                     if (slot.getTimeOffset() != null) {
-                        sb.append("|").append(String.format("%-7s", slot.getTimeOffset()));
+                        sb.append("|").append(String.format("%-8s", slot.getTimeOffset()));
                     }
                 }
 
-                sb.append("|").append(getCurrentDuration());
+                sb.append("|").append(getSlotsDuration());
             }
 
             for (Measure measure : measures) {
-                sb.append("\n--");
+                sb.append("\n-- P").append(measure.getPart().getId());
 
                 for (Voice voice : measure.getVoices()) {
                     sb.append("\n").append(voice.toStrip());
@@ -1354,16 +1353,20 @@ public class MeasureStack
     //-------------//
     public void removeInter (Inter inter)
     {
+        if (inter.isVip()) {
+            logger.info("VIP removeInter {} from [}", inter, this);
+        }
+
         final Part part = inter.getPart();
 
         if (part != null) {
             int partIndex = system.getParts().indexOf(part);
             Measure measure = measures.get(partIndex);
             measure.removeInter(inter);
-        } else if (inter instanceof TupletInter) {
+        }
+
+        if (inter instanceof TupletInter) {
             stackTuplets.remove((TupletInter) inter);
-        } else {
-            throw new IllegalStateException("No part for " + inter);
         }
     }
 
@@ -1394,7 +1397,8 @@ public class MeasureStack
         // Most inters from first measure
         Staff firstStaff = system.getFirstStaff();
         Measure firstMeasure = getMeasureAt(firstStaff);
-        int top = Integer.MAX_VALUE;
+        LineInfo firstLine = firstStaff.getFirstLine();
+        int top = Math.min(firstLine.yAt(left), firstLine.yAt(right));
 
         for (Inter inter : firstMeasure.getTimingInters()) {
             top = Math.min(top, inter.getBounds().y);
@@ -1403,7 +1407,8 @@ public class MeasureStack
         // Most inters from last measure
         Staff lastStaff = system.getLastStaff();
         Measure lastMeasure = getMeasureAt(lastStaff);
-        int bottom = 0;
+        LineInfo lastLine = lastStaff.getLastLine();
+        int bottom = Math.max(lastLine.yAt(left), lastLine.yAt(right));
 
         for (Inter inter : lastMeasure.getTimingInters()) {
             Rectangle bounds = inter.getBounds();
@@ -1427,10 +1432,12 @@ public class MeasureStack
     //-------------//
     public void resetRhythm ()
     {
+        setAbnormal(false);
+        excess = null;
         slots.clear();
-        actualDuration = null;
+        setActualDuration(null);
 
-        // Reset every measure
+        // Reset every measure within this stack
         for (Measure measure : measures) {
             measure.resetRhythm();
         }
@@ -1440,11 +1447,13 @@ public class MeasureStack
     // setAbnormal //
     //-------------//
     /**
-     * Mark this stack as being abnormal.
+     * Mark this stack as being abnormal or not.
+     *
+     * @param abnormal new value
      */
-    public void setAbnormal ()
+    public void setAbnormal (boolean abnormal)
     {
-        abnormal = Boolean.TRUE;
+        this.abnormal = abnormal;
     }
 
     //-------------------//
@@ -1479,7 +1488,7 @@ public class MeasureStack
     public void setExcess (Rational excess)
     {
         this.excess = excess;
-        setAbnormal();
+        setAbnormal(true);
     }
 
     //---------------------//
@@ -1594,28 +1603,8 @@ public class MeasureStack
     public String toString ()
     {
         StringBuilder sb = new StringBuilder(getClass().getSimpleName());
-        ///sb.append("{");
         sb.append('#').append(getPageId());
 
-        if (isCautionary()) {
-            sb.append("C");
-        }
-
-        ///sb.append("}");
         return sb.toString();
-    }
-
-    //--------------------------//
-    // getCurrentDurationString //
-    //--------------------------//
-    private String getCurrentDurationString ()
-    {
-        Rational measureDuration = getCurrentDuration();
-
-        //
-        //        if (measureDuration.equals(Rational.ZERO) && !wholeRestChords.isEmpty()) {
-        //            return "W";
-        //        }
-        return String.format("%-5s", measureDuration.toString());
     }
 }

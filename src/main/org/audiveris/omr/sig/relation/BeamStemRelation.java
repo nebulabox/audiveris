@@ -24,7 +24,19 @@ package org.audiveris.omr.sig.relation;
 import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.sheet.Scale;
+import org.audiveris.omr.sheet.Staff;
+import org.audiveris.omr.sheet.SystemInfo;
+import org.audiveris.omr.sheet.beam.BeamGroup;
+import org.audiveris.omr.sheet.rhythm.Measure;
+import org.audiveris.omr.sheet.rhythm.MeasureStack;
+import org.audiveris.omr.sig.inter.AbstractBeamInter;
+import org.audiveris.omr.sig.inter.BeamHookInter;
+import org.audiveris.omr.sig.inter.HeadChordInter;
 import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.StemInter;
+import static org.audiveris.omr.sig.relation.BeamPortion.*;
+
+import org.jgrapht.event.GraphEdgeChangeEvent;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,25 +80,79 @@ public class BeamStemRelation
     //------------------//
     // getXInGapMaximum //
     //------------------//
-    public static Scale.Fraction getXInGapMaximum ()
+    public static Scale.Fraction getXInGapMaximum (boolean manual)
     {
-        return constants.xInGapMax;
+        return manual ? constants.xInGapMaxManual : constants.xInGapMax;
     }
 
     //-------------------//
     // getXOutGapMaximum //
     //-------------------//
-    public static Scale.Fraction getXOutGapMaximum ()
+    public static Scale.Fraction getXOutGapMaximum (boolean manual)
     {
-        return constants.xOutGapMax;
+        return manual ? constants.xOutGapMaxManual : constants.xOutGapMax;
     }
 
     //----------------//
     // getYGapMaximum //
     //----------------//
-    public static Scale.Fraction getYGapMaximum ()
+    public static Scale.Fraction getYGapMaximum (boolean manual)
     {
-        return constants.yGapMax;
+        return manual ? constants.yGapMaxManual : constants.yGapMax;
+    }
+
+    //-------//
+    // added //
+    //-------//
+    /**
+     * Populate beam portion if needed and update the chord(s) if any that use this stem.
+     * <p>
+     * In the rare case where a stem is shared by several chords, the beam connection applies to
+     * all these chords.
+     *
+     * @param e edge change event
+     */
+    @Override
+    public void added (GraphEdgeChangeEvent<Inter, Relation> e)
+    {
+        final AbstractBeamInter beam = (AbstractBeamInter) e.getEdgeSource();
+        final StemInter stem = (StemInter) e.getEdgeTarget();
+
+        if (beamPortion == null) {
+            if (beam instanceof BeamHookInter) {
+                beamPortion = (beam.getCenter().x < stem.getCenter().x) ? RIGHT : LEFT;
+            } else {
+                int xStem = stem.getCenter().x;
+                Scale scale = stem.getSig().getSystem().getSheet().getScale();
+                int maxDx = scale.toPixels(getXInGapMaximum(false));
+                double left = beam.getMedian().getX1();
+                double right = beam.getMedian().getX2();
+
+                if (xStem < (left + maxDx)) {
+                    beamPortion = LEFT;
+                } else if (xStem > (right - maxDx)) {
+                    beamPortion = RIGHT;
+                } else {
+                    beamPortion = CENTER;
+                }
+            }
+        }
+
+        for (HeadChordInter chord : stem.getChords()) {
+            chord.invalidateCache();
+
+            // Include in proper BeamGroup set within containing Measure?
+            SystemInfo system = stem.getSig().getSystem();
+            Staff staff1 = chord.getTopStaff();
+            MeasureStack stack = system.getMeasureStackAt(stem.getCenter());
+
+            if (stack != null) {
+                Measure measure = stack.getMeasureAt(staff1);
+                BeamGroup.includeBeam(beam, measure);
+            }
+        }
+
+        beam.checkAbnormal();
     }
 
     //----------------//
@@ -111,6 +177,24 @@ public class BeamStemRelation
         double midStem = (stemLine.getY1() + stemLine.getY2()) / 2;
 
         return (extensionPoint.getY() < midStem) ? StemPortion.STEM_TOP : StemPortion.STEM_BOTTOM;
+    }
+
+    //----------------//
+    // isSingleSource //
+    //----------------//
+    @Override
+    public boolean isSingleSource ()
+    {
+        return false;
+    }
+
+    //----------------//
+    // isSingleTarget //
+    //----------------//
+    @Override
+    public boolean isSingleTarget ()
+    {
+        return false;
     }
 
     /**
@@ -143,27 +227,27 @@ public class BeamStemRelation
     // getXInGapMax //
     //--------------//
     @Override
-    protected Scale.Fraction getXInGapMax ()
+    protected Scale.Fraction getXInGapMax (boolean manual)
     {
-        throw new UnsupportedOperationException("Not supported.");
+        return getXInGapMaximum(manual);
     }
 
     //---------------//
     // getXOutGapMax //
     //---------------//
     @Override
-    protected Scale.Fraction getXOutGapMax ()
+    protected Scale.Fraction getXOutGapMax (boolean manual)
     {
-        return getXOutGapMaximum();
+        return getXOutGapMaximum(manual);
     }
 
     //------------//
     // getYGapMax //
     //------------//
     @Override
-    protected Scale.Fraction getYGapMax ()
+    protected Scale.Fraction getYGapMax (boolean manual)
     {
-        return getYGapMaximum();
+        return getYGapMaximum(manual);
     }
 
     //-----------//
@@ -199,12 +283,24 @@ public class BeamStemRelation
                 0.8,
                 "Maximum vertical gap between stem & beam");
 
+        private final Scale.Fraction yGapMaxManual = new Scale.Fraction(
+                1.2,
+                "Maximum manual vertical gap between stem & beam");
+
         private final Scale.Fraction xInGapMax = new Scale.Fraction(
                 0.5,
                 "Maximum horizontal overlap between stem & beam");
 
+        private final Scale.Fraction xInGapMaxManual = new Scale.Fraction(
+                0.75,
+                "Maximum manual horizontal overlap between stem & beam");
+
         private final Scale.Fraction xOutGapMax = new Scale.Fraction(
                 0.1,
                 "Maximum horizontal gap between stem & beam");
+
+        private final Scale.Fraction xOutGapMaxManual = new Scale.Fraction(
+                0.2,
+                "Maximum manual horizontal gap between stem & beam");
     }
 }

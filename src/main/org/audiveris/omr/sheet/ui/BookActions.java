@@ -28,7 +28,7 @@ import org.audiveris.omr.constant.Constant;
 import org.audiveris.omr.constant.ConstantSet;
 import org.audiveris.omr.log.LogUtil;
 import org.audiveris.omr.plugin.Plugin;
-import org.audiveris.omr.plugin.PluginManager;
+import org.audiveris.omr.plugin.PluginsManager;
 import org.audiveris.omr.score.ui.ScoreParameters;
 import org.audiveris.omr.sheet.BasicSheet;
 import org.audiveris.omr.sheet.Book;
@@ -45,6 +45,7 @@ import org.audiveris.omr.sheet.stem.StemScaler;
 import static org.audiveris.omr.sheet.ui.StubDependent.BOOK_IDLE;
 import static org.audiveris.omr.sheet.ui.StubDependent.STUB_AVAILABLE;
 import static org.audiveris.omr.sheet.ui.StubDependent.STUB_IDLE;
+import org.audiveris.omr.sig.ui.InterController;
 import org.audiveris.omr.step.Step;
 import org.audiveris.omr.ui.BoardsPane;
 import org.audiveris.omr.ui.OmrGui;
@@ -255,6 +256,70 @@ public class BookActions
         return INSTANCE;
     }
 
+    //--------------//
+    // annotateBook //
+    //--------------//
+    @Action(enabledProperty = BOOK_IDLE)
+    public Task<Void, Void> annotateBook (ActionEvent e)
+    {
+        final Book book = StubsController.getCurrentBook();
+
+        if (book == null) {
+            return null;
+        }
+
+        return new VoidTask()
+        {
+            @Override
+            protected Void doInBackground ()
+                    throws InterruptedException
+            {
+                try {
+                    LogUtil.start(book);
+                    book.annotate();
+                } finally {
+                    LogUtil.stopBook();
+                }
+
+                return null;
+            }
+        };
+    }
+
+    //---------------//
+    // annotateSheet //
+    //---------------//
+    @Action(enabledProperty = STUB_IDLE)
+    public Task<Void, Void> annotateSheet (ActionEvent e)
+    {
+        final SheetStub stub = StubsController.getCurrentStub();
+
+        if (stub == null) {
+            return null;
+        }
+
+        final Sheet sheet = stub.getSheet();
+
+        return new VoidTask()
+        {
+            @Override
+            protected Void doInBackground ()
+                    throws InterruptedException
+            {
+                try {
+                    LogUtil.start(sheet.getStub());
+                    sheet.annotate();
+                } catch (Exception ex) {
+                    logger.warn("Annotations failed {}", ex);
+                } finally {
+                    LogUtil.stopBook();
+                }
+
+                return null;
+            }
+        };
+    }
+
     //-------------//
     // bookHistory //
     //-------------//
@@ -270,7 +335,7 @@ public class BookActions
     /**
      * Launch the tree display of the current book.
      *
-     * @param e
+     * @param e the event that triggered this action
      */
     @Action(enabledProperty = STUB_AVAILABLE)
     public void browseBook (ActionEvent e)
@@ -615,11 +680,12 @@ public class BookActions
      * Action to invoke the default score external editor
      *
      * @param e the event that triggered this action
+     * @return the task to launch in background
      */
     @Action(enabledProperty = STUB_IDLE)
     public Task<Void, Void> invokeDefaultPlugin (ActionEvent e)
     {
-        Plugin defaultPlugin = PluginManager.getInstance().getDefaultPlugin();
+        Plugin defaultPlugin = PluginsManager.getInstance().getDefaultPlugin();
 
         if (defaultPlugin == null) {
             logger.warn("No default plugin defined");
@@ -693,10 +759,12 @@ public class BookActions
                         allSuffixes.split("\\s")));
 
         if (path != null) {
-            if (Files.exists(path)) {
-                return new LoadImageTask(path);
+            if (!Files.exists(path)) {
+                logger.warn("{} not found.", path);
+            } else if (Files.isDirectory(path)) {
+                logger.warn("{} is a directory.", path);
             } else {
-                logger.warn("File not found {}", path);
+                return new LoadImageTask(path);
             }
         }
 
@@ -909,6 +977,28 @@ public class BookActions
         return new PrintSheetTask(stub.getSheet(), sheetPrintPath);
     }
 
+    //------//
+    // redo //
+    //------//
+    /**
+     * Action to redo undone user modification.
+     *
+     * @param e the event that triggered this action
+     */
+    @Action(enabledProperty = REDOABLE)
+    public void redo (ActionEvent e)
+    {
+        SheetStub stub = StubsController.getCurrentStub();
+
+        if (stub == null) {
+            return;
+        }
+
+        Sheet sheet = stub.getSheet();
+        InterController controller = sheet.getInterController();
+        controller.redo();
+    }
+
     //-----------//
     // resetBook //
     //-----------//
@@ -1059,7 +1149,9 @@ public class BookActions
 
         final Path bookPath = BookManager.getDefaultSavePath(book);
 
-        if ((book.getBookPath() != null) && confirmed(bookPath)) {
+        if ((book.getBookPath() != null)
+            && (bookPath.toAbsolutePath().equals(book.getBookPath().toAbsolutePath())
+                || confirmed(bookPath))) {
             return new StoreBookTask(book, bookPath);
         }
 
@@ -1204,6 +1296,28 @@ public class BookActions
         }
 
         return new TranscribeSheetTask(stub.getSheet());
+    }
+
+    //------//
+    // undo //
+    //------//
+    /**
+     * Action to undo last user modification.
+     *
+     * @param e the event that triggered this action
+     */
+    @Action(enabledProperty = UNDOABLE)
+    public void undo (ActionEvent e)
+    {
+        SheetStub stub = StubsController.getCurrentStub();
+
+        if (stub == null) {
+            return;
+        }
+
+        Sheet sheet = stub.getSheet();
+        InterController controller = sheet.getInterController();
+        controller.undo();
     }
 
     //--------------------//
@@ -1366,7 +1480,7 @@ public class BookActions
             });
 
             dialog.pack();
-            OMR.gui.getApplication().show(dialog);
+            OmrGui.getApplication().show(dialog);
 
             return apply.value;
         } catch (Exception ex) {
@@ -1451,14 +1565,17 @@ public class BookActions
                 try {
                     // Actually open the book
                     Book book = OMR.engine.loadBook(path);
-                    LogUtil.start(book);
-                    book.createStubsTabs(null); // Tabs are now accessible
 
-                    // Focus on first valid stub in book, if any
-                    SheetStub firstValid = book.getFirstValidStub();
+                    if (book != null) {
+                        LogUtil.start(book);
+                        book.createStubsTabs(null); // Tabs are now accessible
 
-                    if (firstValid != null) {
-                        StubsController.invokeSelect(firstValid);
+                        // Focus on first valid stub in book, if any
+                        SheetStub firstValid = book.getFirstValidStub();
+
+                        if (firstValid != null) {
+                            StubsController.invokeSelect(firstValid);
+                        }
                     }
                 } finally {
                     LogUtil.stopBook();
@@ -1496,27 +1613,23 @@ public class BookActions
         protected Void doInBackground ()
                 throws InterruptedException
         {
-            if (Files.exists(path)) {
-                try {
-                    // Actually open the image file
-                    Book book = OMR.engine.loadInput(path);
-                    LogUtil.start(book);
-                    book.createStubs(null);
-                    book.createStubsTabs(null); // Tabs are now accessible
+            try {
+                // Actually open the image file
+                Book book = OMR.engine.loadInput(path);
+                LogUtil.start(book);
+                book.createStubs(null);
+                book.createStubsTabs(null); // Tabs are now accessible
 
-                    // Focus on first valid stub in book, if any
-                    SheetStub firstValid = book.getFirstValidStub();
+                // Focus on first valid stub in book, if any
+                SheetStub firstValid = book.getFirstValidStub();
 
-                    if (firstValid != null) {
-                        StubsController.invokeSelect(firstValid);
-                    }
-                } catch (Exception ex) {
-                    logger.warn("Error opening path " + path + " " + ex, ex);
-                } finally {
-                    LogUtil.stopBook();
+                if (firstValid != null) {
+                    StubsController.invokeSelect(firstValid);
                 }
-            } else {
-                logger.warn("Path {} does not exist", path);
+            } catch (Exception ex) {
+                logger.warn("Error opening path " + path + " " + ex, ex);
+            } finally {
+                LogUtil.stopBook();
             }
 
             return null;

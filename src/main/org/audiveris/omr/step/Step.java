@@ -37,6 +37,8 @@ import org.audiveris.omr.sheet.stem.StemsStep;
 import org.audiveris.omr.sheet.symbol.LinksStep;
 import org.audiveris.omr.sheet.symbol.SymbolsStep;
 import org.audiveris.omr.sheet.ui.SheetTab;
+import org.audiveris.omr.sig.ui.UITask.OpKind;
+import org.audiveris.omr.sig.ui.UITaskList;
 import org.audiveris.omr.text.TextsStep;
 
 /**
@@ -125,6 +127,20 @@ public enum Step
     public void clearErrors (Sheet sheet)
     {
         helper.clearErrors(this, sheet);
+    }
+
+    //--------------//
+    // isImpactedBy //
+    //--------------//
+    /**
+     * Report whether this step is impact by an action on the provided class
+     *
+     * @param classe the class to examine
+     * @return true if impacted
+     */
+    public boolean isImpactedBy (Class classe)
+    {
+        return helper.isImpactedBy(classe);
     }
 
     //------------//
@@ -236,5 +252,20 @@ public enum Step
 
             return Step.valueOf(str);
         }
+    }
+
+    //--------//
+    // impact //
+    //--------//
+    /**
+     * Process the impact of the UI task sequence on this step.
+     *
+     * @param seq    the provided UI task sequence
+     * @param opKind which operation is done on seq
+     */
+    public void impact (UITaskList seq,
+                        OpKind opKind)
+    {
+        helper.impact(seq, opKind);
     }
 }

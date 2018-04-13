@@ -164,33 +164,6 @@ public class CLI
         return params.outputFolder;
     }
 
-    //---------------//
-    // getParameters //
-    //---------------//
-    /**
-     * Parse the CLI arguments and return the populated parameters structure.
-     *
-     * @param args the CLI arguments
-     * @return the parsed parameters, or null if failed
-     * @throws org.kohsuke.args4j.CmdLineException
-     */
-    public Parameters getParameters (final String... args)
-            throws CmdLineException
-    {
-        logger.info("CLI args: {}", Arrays.toString(args));
-        actualArgs = args;
-
-        parser.parseArgument(args);
-
-        if (logger.isDebugEnabled()) {
-            new Dumping().dump(params);
-        }
-
-        checkParams();
-
-        return params;
-    }
-
     //-------------//
     // isBatchMode //
     //-------------//
@@ -215,6 +188,33 @@ public class CLI
     public boolean isHelpMode ()
     {
         return params.helpMode;
+    }
+
+    //-----------------//
+    // parseParameters //
+    //-----------------//
+    /**
+     * Parse the CLI arguments and return the populated parameters structure.
+     *
+     * @param args the CLI arguments
+     * @return the parsed parameters, or null if failed
+     * @throws org.kohsuke.args4j.CmdLineException if error found in arguments
+     */
+    public Parameters parseParameters (final String... args)
+            throws CmdLineException
+    {
+        logger.info("CLI args: {}", Arrays.toString(args));
+        actualArgs = args;
+
+        parser.parseArgument(args);
+
+        if (logger.isDebugEnabled()) {
+            new Dumping().dump(params);
+        }
+
+        checkParams();
+
+        return params;
     }
 
     //------------------//
@@ -252,10 +252,10 @@ public class CLI
         // Print syntax
         buf.append("\n");
         buf.append("\nSyntax:");
-        buf.append("\n   audiveris [OPTIONS] [--] [INPUT_FILES]\n");
+        buf.append("\n    audiveris [OPTIONS] [--] [INPUT_FILES]\n");
 
         buf.append("\n@file:");
-        buf.append("\n   Content to be extended in line");
+        buf.append("\n    Content of file to be extended in line");
         buf.append("\n");
 
         buf.append("\nOptions:\n");
@@ -265,15 +265,15 @@ public class CLI
         buf.append(writer.toString());
 
         buf.append("\nInput file extensions:");
-        buf.append("\n   .omr        : book file");
-        buf.append("\n   [any other] : image file");
+        buf.append("\n    .omr        : book file  (input/output)");
+        buf.append("\n    [any other] : image file (input)");
         buf.append("\n");
 
         // Print all steps
         buf.append("\nSheet steps are in order:");
 
         for (Step step : Step.values()) {
-            buf.append(String.format("%n   %-10s : %s", step.toString(), step.getDescription()));
+            buf.append(String.format("%n    %-10s : %s", step.toString(), step.getDescription()));
         }
 
         buf.append("\n");
@@ -340,8 +340,9 @@ public class CLI
             // Obtain the book instance
             final Book book = loadBook(path);
 
-            // Process the book instance
-            processBook(book);
+            if (book != null) {
+                processBook(book); // Process the book instance
+            }
 
             return null;
         }
@@ -493,11 +494,10 @@ public class CLI
     {
         //~ Instance fields ------------------------------------------------------------------------
 
-        //
-        //        /** Should annotations be produced?. */
-        //        @Option(name = "-annotate", usage = "Annotates book symbols")
-        //        boolean annotate;
-        //
+        /** Should symbols annotations be produced?. */
+        @Option(name = "-annotate", hidden = true, usage = "Annotate book symbols")
+        boolean annotate;
+
         /** Batch mode. */
         @Option(name = "-batch", usage = "Run with no graphic user interface")
         boolean batchMode;
@@ -789,6 +789,12 @@ public class CLI
                 if (params.sample) {
                     logger.debug("Sample book");
                     book.sample();
+                }
+
+                // Book annotate?
+                if (params.annotate) {
+                    logger.debug("Annotate book");
+                    book.annotate();
                 }
 
                 // Book save?

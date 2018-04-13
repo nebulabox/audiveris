@@ -70,6 +70,9 @@ import java.util.List;
  * Class {@code SheetScanner} runs OCR on the whole sheet, where good inters and
  * staves core areas have been blanked.
  * <p>
+ * Tesseract is used in MULTI_BLOCK layout mode, meaning that the sheet main contain several blocks
+ * of text.
+ * <p>
  * The raw OCR output will later be processed at system level by dedicated TextBuilder instances.
  *
  * @author Hervé Bitteur
@@ -268,7 +271,7 @@ public class SheetScanner
                 final List<Inter> erased = new ArrayList<Inter>();
 
                 for (Inter inter : sig.vertexSet()) {
-                    if (!inter.isDeleted()) {
+                    if (!inter.isRemoved()) {
                         if (canHide(inter)) {
                             erased.add(inter);
                         }

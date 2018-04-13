@@ -64,13 +64,16 @@ public class MusicFontTest
 
     //~ Methods ------------------------------------------------------------------------------------
     /**
-     * Printout of each MusicFont character
+     * Printout of each MusicFont character.
      */
     @Test
     public void textPrintout ()
             throws Exception
     {
-        File file = new File("data/temp/" + MusicFont.FONT_NAME + ".pdf");
+        File dir = new File("data/temp");
+        dir.mkdirs();
+
+        File file = new File(dir, MusicFont.FONT_NAME + ".pdf");
 
         try (FileOutputStream fos = new FileOutputStream(file)) {
             Rectangle rect = new Rectangle(pageWidth, pageHeight);
@@ -83,7 +86,7 @@ public class MusicFontTest
 
             PdfContentByte cb = writer.getDirectContent();
             Graphics2D g = cb.createGraphics(pageWidth, pageHeight);
-            MusicFont musicFont = new MusicFont(64, 0);
+            MusicFont musicFont = MusicFont.getPointFont(64, 0);
             Font stringFont = g.getFont().deriveFont(24f);
             Font infoFont = stringFont.deriveFont(15f);
             String frm = "x:%4.1f y:%4.1f w:%4.1f h:%4.1f";

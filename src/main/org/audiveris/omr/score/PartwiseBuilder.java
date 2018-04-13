@@ -72,7 +72,6 @@ import org.audiveris.omr.sig.relation.ChordPedalRelation;
 import org.audiveris.omr.sig.relation.ChordSentenceRelation;
 import org.audiveris.omr.sig.relation.ChordSyllableRelation;
 import org.audiveris.omr.sig.relation.ChordWedgeRelation;
-import org.audiveris.omr.sig.relation.EndingSentenceRelation;
 import org.audiveris.omr.sig.relation.FermataChordRelation;
 import org.audiveris.omr.sig.relation.FlagStemRelation;
 import org.audiveris.omr.sig.relation.MarkerBarRelation;
@@ -273,8 +272,8 @@ public class PartwiseBuilder
      * Create a new PartwiseBuilder object, on a related score instance.
      *
      * @param score the underlying score
-     * @throws InterruptedException
-     * @throws ExecutionException
+     * @throws InterruptedException if the thread has been interrupted
+     * @throws ExecutionException   if a checked exception was thrown
      */
     private PartwiseBuilder (Score score)
             throws InterruptedException, ExecutionException
@@ -294,8 +293,8 @@ public class PartwiseBuilder
      *
      * @param score the score to export (cannot be null)
      * @return the populated ScorePartwise
-     * @throws InterruptedException
-     * @throws ExecutionException
+     * @throws InterruptedException if the thread has been interrupted
+     * @throws ExecutionException   if a checked exception was thrown
      */
     public static ScorePartwise build (Score score)
             throws InterruptedException, ExecutionException
@@ -893,7 +892,6 @@ public class PartwiseBuilder
      * This can be a left, mid or right barline WRT the current measure.
      * <p>
      * Related entities: repeat, ending, fermata, segno, coda.
-     * (TODO: still to be implemented: ending)
      *
      * @param partBarline the PartBarline to process
      * @param location    barline location WRT current measure
@@ -912,6 +910,12 @@ public class PartwiseBuilder
             final EndingInter ending = (location == RightLeftMiddle.MIDDLE) ? null
                     : partBarline.getEnding(
                             (location == RightLeftMiddle.LEFT) ? LEFT : RIGHT);
+            final String endingValue = (ending != null) ? ending.getValue() : null;
+            String endingNumber = (ending != null) ? ending.getExportedNumber() : null;
+
+            if (endingNumber == null) {
+                endingNumber = "99"; // Dummy integer value to mean: unknown
+            }
 
             if ((partBarline == current.measure.getLeftBarline())
                 || (location == RightLeftMiddle.MIDDLE)
@@ -952,16 +956,12 @@ public class PartwiseBuilder
 
                             pmEnding.setType(StartStopDiscontinue.START);
 
-                            //TODO: number/text?
-                            SIGraph sig = ending.getSig();
+                            // Number (mandatory)
+                            pmEnding.setNumber(endingNumber);
 
-                            for (Relation r : sig.getRelations(
-                                    ending,
-                                    EndingSentenceRelation.class)) {
-                                SentenceInter sentence = (SentenceInter) sig.getOppositeInter(
-                                        ending,
-                                        r);
-                                pmEnding.setValue(sentence.getValue());
+                            // Value (optional)
+                            if (endingValue != null) {
+                                pmEnding.setValue(endingValue);
                             }
 
                             pmBarline.setEnding(pmEnding);
@@ -1015,10 +1015,18 @@ public class PartwiseBuilder
                             Staff staff = current.measure.getPart().getFirstStaff();
                             pmEnding.setDefaultY(yOf(pt, staff));
 
-                            pmEnding.setType(
-                                    (ending.getRightLeg() != null) ? StartStopDiscontinue.STOP
-                                    : StartStopDiscontinue.DISCONTINUE);
-                            //TODO: number?
+                            Line2D leg = ending.getRightLeg();
+
+                            if (leg != null) {
+                                pmEnding.setEndLength(toTenths(leg.getY2() - pt.getY()));
+                                pmEnding.setType(StartStopDiscontinue.STOP);
+                            } else {
+                                pmEnding.setType(StartStopDiscontinue.DISCONTINUE);
+                            }
+
+                            // Number (mandatory)
+                            pmEnding.setNumber(endingNumber);
+
                             pmBarline.setEnding(pmEnding);
                         }
                     }
@@ -1380,6 +1388,46 @@ public class PartwiseBuilder
         }
     }
 
+    //----------------//
+    // processKeyVoid //
+    //----------------//
+    /**
+     * Process a lack of key signature at system start.
+     */
+    private void processKeyVoid ()
+    {
+        try {
+            logger.debug("processKeyVoid");
+
+            final Key key = factory.createKey();
+            key.setFifths(new BigInteger("0"));
+
+            // Is this new?
+            final int staffCount = current.measure.getPart().getStaves().size();
+            boolean isNew = false;
+
+            for (int index = 0; index < staffCount; index++) {
+                Key currentKey = current.keys.get(index);
+
+                if ((currentKey != null) && !areEqual(currentKey, key)) {
+                    isNew = true;
+
+                    break;
+                }
+            }
+
+            if (isNew) {
+                getAttributes().getKey().add(key);
+
+                for (int index = 0; index < staffCount; index++) {
+                    current.keys.put(index, key);
+                }
+            }
+        } catch (Exception ex) {
+            logger.warn("Error in processKeyVoid", ex);
+        }
+    }
+
     //-------------//
     // processKeys //
     //-------------//
@@ -1391,20 +1439,23 @@ public class PartwiseBuilder
     private void processKeys ()
     {
         // Something to process?
-        if (!current.measure.hasKeys()) {
-            return;
-        }
+        if (current.measure.hasKeys()) {
+            // Check if all keys are the same across all staves in measure
+            if (current.measure.hasSameKeys()) {
+                processKey(current.measure.getKey(0), true); // global: true
+            } else {
+                // Work staff by staff
+                final int staffCount = current.measure.getPart().getStaves().size();
 
-        // Check if all keys are the same across all staves in measure
-        if (current.measure.hasSameKeys()) {
-            processKey(current.measure.getKey(0), true);
+                for (int index = 0; index < staffCount; index++) {
+                    KeyInter key = current.measure.getKey(index);
+                    processKey(key, false); // global: false
+                }
+            }
         } else {
-            // Work staff by staff
-            final int staffCount = current.measure.getPart().getStaves().size();
-
-            for (int index = 0; index < staffCount; index++) {
-                KeyInter key = current.measure.getKey(index);
-                processKey(key, false);
+            // No key signature in measure: this is meaningful only at beginning of staff
+            if (isFirst.measure) {
+                processKeyVoid();
             }
         }
     }
@@ -1612,7 +1663,10 @@ public class PartwiseBuilder
                     AbstractChordInter chord = voice.getWholeChord();
                     clefIters.push(measure.getWidth(), chord.getTopStaff());
                     processChord(chord);
-                    timeCounter = stack.getActualDuration();
+
+                    if (stack.getActualDuration() != null) {
+                        timeCounter = stack.getActualDuration();
+                    }
                 } else {
                     for (Slot slot : stack.getSlots()) {
                         Voice.SlotVoice info = voice.getSlotInfo(slot);
@@ -1699,7 +1753,7 @@ public class PartwiseBuilder
             // For first note in chord
             if (!current.measure.isDummy()) {
                 if (isFirstInChord) {
-                    // Chord direction events (statement, pedal, dynamics, TODO: others?)
+                    // Chord events (direction, pedal, dynamics, TODO: others?)
                     for (Relation rel : sig.edgesOf(chord)) {
                         if (rel instanceof ChordSentenceRelation) {
                             processDirection((SentenceInter) sig.getOppositeInter(chord, rel));
@@ -1732,9 +1786,11 @@ public class PartwiseBuilder
                 //                    ///node.accept(this);
                 //                    process(node);
                 //                }
-                for (Relation rel : sig.edgesOf(chord)) {
-                    if (rel instanceof FermataChordRelation) {
-                        processFermata((FermataInter) sig.getOppositeInter(chord, rel), null);
+                if (sig != null) {
+                    for (Relation rel : sig.edgesOf(chord)) {
+                        if (rel instanceof FermataChordRelation) {
+                            processFermata((FermataInter) sig.getOppositeInter(chord, rel), null);
+                        }
                     }
                 }
             } else {
@@ -1772,13 +1828,15 @@ public class PartwiseBuilder
 
                 current.pmNote.setRest(rest);
             } else {
+                HeadChordInter headChord = (HeadChordInter) chord;
+
                 // Grace?
                 if (isFirstInChord && note.getShape().isSmall()) {
                     Grace grace = factory.createGrace();
                     current.pmNote.setGrace(grace);
 
                     // Slash? (check the flag)
-                    StemInter stem = chord.getStem();
+                    StemInter stem = headChord.getStem();
 
                     if (stem != null) {
                         for (Relation rel : sig.getRelations(stem, FlagStemRelation.class)) {
@@ -1849,7 +1907,8 @@ public class PartwiseBuilder
                     final Rational dur;
 
                     if (chord.isWholeRest()) {
-                        dur = current.measure.getStack().getActualDuration();
+                        Rational measureDur = current.measure.getStack().getActualDuration();
+                        dur = (measureDur != null) ? measureDur : Rational.ONE; // Not too bad...
                     } else {
                         dur = chord.getDuration();
                     }
@@ -1926,9 +1985,11 @@ public class PartwiseBuilder
                 }
 
                 // Beams ?
+                int beamCounter = 0;
+
                 for (AbstractBeamInter beam : chord.getBeams()) {
                     Beam pmBeam = factory.createBeam();
-                    pmBeam.setNumber(1 + chord.getBeams().indexOf(beam));
+                    pmBeam.setNumber(1 + beamCounter++);
 
                     if (beam.isHook()) {
                         if (beam.getCenter().x > chord.getStem().getCenter().x) {
@@ -2111,7 +2172,8 @@ public class PartwiseBuilder
 
                 // [Encoding]/Software
                 encoding.getEncodingDateOrEncoderOrSoftware().add(
-                        factory.createEncodingSoftware("Audiveris" + " " + WellKnowns.TOOL_REF));
+                        factory.createEncodingSoftware(
+                                WellKnowns.TOOL_NAME + " " + WellKnowns.TOOL_REF));
 
                 // [Encoding]/EncodingDate
                 // Let the Marshalling class handle it
@@ -2839,11 +2901,10 @@ public class PartwiseBuilder
             }
 
             // Populate iterators
-            iters = new HashMap<Staff, ListIterator<ClefInter>>();
+            iters = new LinkedHashMap<Staff, ListIterator<ClefInter>>();
 
             for (Map.Entry<Staff, List<ClefInter>> entry : map.entrySet()) {
-                List<ClefInter> list = entry.getValue();
-                Collections.sort(list, Inter.byCenterAbscissa); // not needed? (already sorted)
+                List<ClefInter> list = entry.getValue(); // Already sorted by full center abscissa
                 iters.put(entry.getKey(), list.listIterator());
             }
         }
